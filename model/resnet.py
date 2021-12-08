@@ -1,0 +1,139 @@
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+def conv3x3(in_planes, out_planes, stride=1, dilation=1):
+    """3x3 convolution with padding"""
+
+    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=int(stride),
+                     dilation=dilation, padding=dilation, bias=False)
+
+
+def conv1x1(in_planes, out_planes, stride=1):
+    """1x1 convolution"""
+
+    return nn.Conv2d(
+        in_planes, out_planes, kernel_size=1, stride=int(stride), bias=False)
+
+def conv3x3x3(in_planes, out_planes, stride=1, dilation=1):
+    """3D convolution with 3x3x3 kernel"""
+
+    return nn.Conv3d(in_planes, out_planes, kernel_size=3, stride=int(stride),
+            dilation=dilation, padding=dilation, bias=False)
+
+def conv1x1x1(in_planes, out_planes, stride=1):
+    """3D convolution with 1x1x1 kernel"""
+
+    return nn.Conv3d(
+        in_planes, out_planes, kernel_size=1, stride=int(stride), bias=False)
+
+class BasicBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, dilation=1, conv_type='2D'):
+        super(BasicBlock, self).__init__()
+
+        self.conv1 = conv3x3(inplanes, planes, stride, dilation) if conv_type == '2D' \
+                else conv3x3x3(inplanes, planes, stride, dilation) 
+        self.bn1 = nn.GroupNorm(16, planes)
+
+        self.conv2 = conv3x3(planes, planes, 1, dilation) if conv_type == '2D' \
+                else conv3x3x3(planes, planes, 1, dilation)
+        self.bn2 = nn.GroupNorm(16, planes)
+
+        if stride != 1 or inplanes != planes:
+            self.downsample = nn.Sequential(
+                conv1x1(inplanes, planes, stride), nn.GroupNorm(16, planes)) if conv_type == '2D' \
+                else nn.Sequential(conv1x1x1(inplanes, planes, stride), nn.GroupNorm(16, planes))
+        else:
+            self.downsample = None
+
+
+    def forward(self, x):
+        identity = x
+
+        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        out = self.bn2(self.conv2(out))
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = F.relu(out, inplace=True)
+
+        return out
+
+
+class Bottleneck(nn.Module):
+    expansion = 4
+
+    def __init__(self, inplanes, planes, stride=1, dilation=1, conv_type='2D'):
+        super(Bottleneck, self).__init__()
+        self.conv1 = conv1x1(inplanes, planes) if conv_type == '2D' \
+                else conv1x1x1(inplanes, planes)
+        self.bn1 = nn.GroupNorm(16, planes)
+        self.conv2 = conv3x3(planes, planes, stride, dilation) if conv_type == '2D' \
+                else conv3x3x3(planes, planes, stride, dilation)
+        self.bn2 = nn.GroupNorm(16, planes)
+        self.conv3 = conv1x1(planes, planes * self.expansion) if conv_type == '2D' \
+                else conv1x1x1(planes, planes * self.expansion)
+        self.bn3 = nn.GroupNorm(16, planes * self.expansion)
+
+        if stride != 1 or inplanes != planes * self.expansion:
+            self.downsample = nn.Sequential(
+                conv1x1(inplanes, planes * self.expansion, stride), 
+                nn.GroupNorm(16, planes * self.expansion)) if conv_type == '2D' \
+                else nn.Sequential(conv1x1x1(inplanes, planes * self.expansion, stride),
+                        nn.GroupNorm(16, planes * self.expansion))
+        else:
+            self.downsample = None
+
+    def forward(self, x):
+        identity = x
+
+        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        out = F.relu(self.bn2(self.conv2(out)), inplace=True)
+        out = self.bn3(self.conv3(out))
+ 
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = F.relu(out)
+
+        return out
+
+
+class ResNetLayer(nn.Sequential):
+
+    def __init__(self, in_channels, channels, num_blocks, stride=1, 
+                 dilation=1, blocktype='bottleneck', conv_type='2D'):
+        
+        assert conv_type in ['2D', '3D']
+        # Get block type
+        if blocktype == 'basic':
+            block = BasicBlock
+        elif blocktype == 'bottleneck':
+            block = Bottleneck
+        else:
+            raise Exception("Unknown residual block type: " + str(blocktype))
+        
+        # Construct layers
+        layers = [block(in_channels, channels, stride, dilation, conv_type=conv_type)]
+        for _ in range(1, num_blocks):
+            layers.append(block(channels * block.expansion, channels, 1, dilation, conv_type=conv_type))
+
+        self.in_channels = in_channels
+        self.out_channels = channels * block.expansion
+
+        super(ResNetLayer, self).__init__(*layers)
+
+def _test():
+    resnet = ResNetLayer(256, 512, 3, blocktype='basic', conv_type='3D')
+    x = torch.rand((1, 256, 10, 10,10))
+    out = resnet(x)
+    print(out.shape)
+
+if __name__ == '__main__':
+    _test()
