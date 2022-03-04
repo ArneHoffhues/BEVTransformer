@@ -1,0 +1,72 @@
+model:
+  base_learning_rate: 4.5e-06
+  target: bev.model.model.BEVTransformer
+  params:
+    n_labels: 7
+    n_embed: 512
+    colorize:  [[0, 0, 0],
+                [255, 0, 255],
+                [75, 0, 75],
+                [100, 150, 245],
+                [80, 30, 180],
+                [100, 80, 250],
+                [255, 30, 30],
+                ]
+    transformer_config:
+      target: bev.model.transformer.SamplingTransformer
+      params:
+        bev_grid_size: [25, 25]
+        grid_cell_width: 2
+        vertical_sampling_range: [-3, 3]
+        n_samples_vertical: 20
+        n_samples_ray: 25
+        neighbourhood_size: 9
+        initialization_level: -0.5
+        n_embed: 512
+        n_head: 8
+        num_layers: 6
+        dim_feedforward: 2048
+        normalize_before: False
+        activation: 'relu'
+    backbone_config:
+      target: bev.model.backbone.swin.SwinFPN
+      params:      
+        variant: 'tiny'
+        pretrained_path: /home/hoffhues/master_repositories/BEVTransformer/pretrained/mask_rcnn_swin_tiny_patch4_window7.pth
+    net3d_config:
+      target: bev.model.3d_feature_extractor.Net3D
+      params:
+        scales: [4, 8, 16, 32, 64]
+        in_ch: 256
+        out_ch: 512
+        n_classes: 7
+        bev_grid_size: [25, 25]
+        grid_cell_width: 2
+        vertical_sampling_range: [-3, 3]
+        n_samples: 20
+    loss_config:
+      target: bev.model.loss.BCELoss
+
+data:
+  target: bev.data.data_module.DataModuleFromConfig
+  params:
+    batch_size: 16
+    num_workers: 8
+    train:
+      target: bev.data.nuscenes_bev.NuscenesSegmentationTrain
+      params:
+        n_labels: 7
+        nuscenes_path: /globalwork/data/nuScenes-v1.0
+        label_path: /home/hoffhues/mono-semantic-maps_labels/nuscenes/map-labels-increased-resolution
+        dataset_size: 40000
+    validation:
+      target: bev.data.nuscenes_bev.NuscenesSegmentationValidation
+      params:
+        nuscenes_path: /globalwork/data/nuScenes-v1.0
+        label_path: /home/hoffhues/mono-semantic-maps_labels/nuscenes/map-labels-increased-resolution
+        n_labels: 7
+        preprocess_param:
+          crop_region: [150, 0, 650, 500]
+          flip_prob: 0.0
+          rgb_size: [400, 800]
+          bev_size: [25, 25]

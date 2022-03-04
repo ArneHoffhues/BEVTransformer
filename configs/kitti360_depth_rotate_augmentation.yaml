@@ -1,0 +1,84 @@
+model:
+  base_learning_rate: 4.5e-06
+  target: bev.model.model.DepthAndSegUpsampler
+  params:
+    n_labels: 10
+    n_embed: 512
+    class_names: ['road', 'sidewalk', 'building', 'wall', 'vegetation', 'terrain', 'person',
+                  'rider', 'car', 'truck']
+    colorize: [[255, 0, 255],
+               [75, 0, 75],
+               [255, 200, 0],
+               [255, 120, 50],
+               [0, 175, 0],
+               [150, 240, 80],
+               [255, 30, 30],
+               [100, 230, 245],
+               [100, 150, 245],
+               [80, 30, 180],
+               [0, 0, 0]]
+    ignore_index: 255
+    sfsegnet_config:
+      target: bev.model.sfsegnet.sfnet_resnet.DeepR18_SF_deeply_dsn
+      params:
+        num_classes: 19
+        snapshot: ./pretrained/SFSegNet/sfnet_r18_map.pth
+    depth_module_config:
+      target: bev.model.depth_projection.depth_module.GridAssembler
+      params:
+        grid_dim: [50, 50]
+        z_range: [51, 1]
+        x_range: [-25, 25]
+        num_pix: 540672
+    decoder_config:
+      target: bev.model.decoder.Decoder
+      params:
+        in_channels: 512
+        num_classes: 10
+        predict_vis: True
+        layers: [6, 1, 1]
+        strides: [1, 2, 2]
+    loss_config:
+      target: bev.model.loss.CombinedLoss
+      params:
+        extrinsics:
+          translation: [0.8, 0.3, 1.55]
+          rotation: [-85, 0, 180]
+        background_classes: [2, 3, 4, 5]
+        foreground_classes: [0, 1, 6, 7, 8, 9]      
+
+data:
+  target: bev.data.data_module.DataModuleFromConfig
+  params:
+    batch_size: 5
+    num_workers: 8
+    train:
+      target: bev.data.kitti360_bev.KITTI360BEVTrain
+      params:
+        n_labels: 10
+        rgb_root: /globalwork/data/KITTI-360
+        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        depth_root: /home/hoffhues/PanopticBEV_images/KITTI360/depth/train
+        with_depth: True
+        preprocess_param:
+          bottom_crop_augmentation_prob: 0.
+          flip_prob: 0.
+          side_crop_augmentation_prob: 0.
+          rotate_augmentation_prob: 1.
+          brightness_factor: 0.
+          contrast_factor: 0.
+    validation:
+      target: bev.data.kitti360_bev.KITTI360BEVValidation
+      params:
+        n_labels: 10
+        rgb_root: /globalwork/data/KITTI-360
+        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        depth_root: /home/hoffhues/PanopticBEV_images/KITTI360/depth/val
+        with_depth: True
+        preprocess_param:
+          bottom_crop_augmentation_prob: 0.
+          flip_prob: 0.
+          side_crop_augmentation_prob: 0.
+          rotate_augmentation_prob: 0.
+          saturation_factor: 0
+          hue_factor: 0

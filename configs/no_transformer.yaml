@@ -1,0 +1,64 @@
+model:
+  base_learning_rate: 4.5e-06
+  target: bev.model.model.NoTransformer
+  params:
+    n_labels: 11
+    n_embed: 128
+    colorize:  [[0, 0, 0],
+                [100, 150, 245],
+                [100, 80, 250],
+                [80, 30, 180],
+                [255, 30, 30],
+                [255, 0, 255],
+                [75, 0, 75],
+                [255, 120, 50],
+                [150, 240, 80],
+                [0, 175, 0],
+                [255, 200, 0],
+                ]
+    transformer_config:
+    backbone_config:
+      target: bev.model.backbone.swin.SwinFPN
+      params:      
+        variant: 'tiny'
+        pretrained_path: /home/hoffhues/master_repositories/BEVTransformer/pretrained/mask_rcnn_swin_tiny_patch4_window7.pth
+    net3d_config:
+      target: bev.model.3d_feature_extractor.Net3D
+      params:
+        scales: [4, 8, 16, 32, 64]
+        in_ch: 256
+        out_ch: 128
+        n_classes: 11
+        bev_grid_size: [49, 50]
+        grid_cell_width: 1
+        vertical_sampling_range: [-3, 3]
+        n_samples: 50
+        with_context: True
+    loss_config:
+      target: bev.model.loss.BCELoss
+
+data:
+  target: bev.data.data_module.DataModuleFromConfig
+  params:
+    batch_size: 12
+    num_workers: 8
+    train:
+      target: bev.data.kitti_bev.KITTIBEVTrain
+      params:
+        rgb_root: /globalwork/data/KITTI_odometry_color/dataset/sequences/
+        bev_root: /home/hoffhues/BEV_data/sequences
+        n_labels: 11
+        split: ['01', '02', '03', '04', '05', '06', '07', '09', '10']
+    validation:
+      target: bev.data.kitti_bev.KITTIBEVValidation
+      params:
+        rgb_root: /globalwork/data/KITTI_odometry_color/dataset/sequences/
+        bev_root: /home/hoffhues/BEV_data/sequences
+        n_labels: 11
+        split: ['00', '08']
+        preprocess_param:
+          crop_region: [300, 600, 1300, 1580]
+          flip_prob: 0.0
+          rgb_size: [256, 1024]
+          bev_size: [49, 50]
+

@@ -1,0 +1,106 @@
+model:
+  base_learning_rate: 4.5e-06
+  target: bev.model.model.BEVTransformer
+  params:
+    n_labels: 10
+    n_embed: 256
+    class_names: ['road', 'sidewalk', 'building', 'wall', 'vegetation', 'terrain', 'person',
+                  'rider', 'car', 'truck']
+    colorize: [[255, 0, 255],
+               [75, 0, 75],
+               [255, 200, 0],
+               [255, 120, 50],
+               [0, 175, 0],
+               [150, 240, 80],
+               [255, 30, 30],
+               [100, 230, 245],
+               [100, 150, 245],
+               [80, 30, 180],
+               [0, 0, 0]]
+    ignore_index: 255
+    transformer_config:
+      target: bev.model.transformer.SamplingTransformer
+      params:
+        bev_grid_size: [50, 50]
+        grid_cell_width: 1
+        vertical_sampling_range: [-3, 3]
+        n_samples_vertical: 20
+        n_samples_ray: 50
+        neighbourhood_size: 7
+        initialization_level: -0.5
+        n_embed: 256
+        n_head: 8
+        num_layers: 6
+        dim_feedforward: 1024
+        normalize_before: False
+        activation: 'relu'
+    backbone_config:
+      target: bev.model.backbone.swin.SwinFPN
+      params:      
+        variant: 'tiny'
+        pretrained_path: /home/hoffhues/master_repositories/BEVTransformer/pretrained/mask_rcnn_swin_tiny_patch4_window7.pth
+    net3d_config:
+      target: bev.model.3d_feature_extractor.Net3D
+      params:
+        scales: [4, 8, 16, 32, 64]
+        in_ch: 256
+        out_ch: 256
+        n_classes: 10
+        bev_grid_size: [50, 50]
+        grid_cell_width: 1
+        vertical_sampling_range: [-3, 3]
+        n_samples: 20
+    decoder_config:
+      target: bev.model.decoder.Decoder
+      params:
+        in_channels: 256
+        num_classes: 10
+        final_res: [676, 676]
+        predict_vis: True
+    loss_config:
+      target: bev.model.loss.CombinedLoss
+      params:
+        extrinsics:
+          translation: [0.8, 0.3, 1.55]
+          rotation: [-85, 0, 180]
+        background_classes: [2, 3, 4, 5]
+        foreground_classes: [0, 1, 6, 7, 8, 9]
+        out_shape: [676, 676]
+        resolution: 0.074
+
+
+data:
+  target: bev.data.data_module.DataModuleFromConfig
+  params:
+    batch_size: 2
+    num_workers: 8
+    train:
+      target: bev.data.kitti360_bev.KITTI360BEVTrain
+      params:
+        n_labels: 10
+        rgb_root: /globalwork/data/KITTI-360
+        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        preprocess_param:
+          rgb_size: [384, 1408]
+          bev_size: [676, 676]
+          bottom_crop_augmentation_prob: 0.
+          side_crop_augmentation_prob: 0.
+          rotate_augmentation_prob: 0.
+          brightness_factor: 0
+          contrast_factor: 0
+    validation:
+      target: bev.data.kitti360_bev.KITTI360BEVValidation
+      params:
+        n_labels: 10
+        rgb_root: /globalwork/data/KITTI-360
+        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        preprocess_param:
+          rgb_size: [384, 1408]
+          bev_size: [676, 676]
+          bottom_crop_augmentation_prob: 0.
+          side_crop_augmentation_prob: 0.
+          rotate_augmentation_prob: 0.
+          flip_prob: 0.
+          brightness_factor: 0
+          contrast_factor: 0
+

@@ -5,6 +5,15 @@ import torch.nn.functional as F
 
 def conv3x3(in_planes, out_planes, stride=1, dilation=1):
     """3x3 convolution with padding"""
+    
+    # Fractional strides correspond to transpose convolution
+    if stride < 1:
+        stride = int(round(1 / stride))
+        kernel_size = stride + 2
+        padding = int((dilation * (kernel_size - 1) - stride + 1) / 2)
+        return nn.ConvTranspose2d(
+            in_planes, out_planes, kernel_size, stride, padding, 
+            output_padding=0, dilation=dilation, bias=False)
 
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=int(stride),
                      dilation=dilation, padding=dilation, bias=False)
@@ -12,6 +21,12 @@ def conv3x3(in_planes, out_planes, stride=1, dilation=1):
 
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
+    
+    # Fractional strides correspond to transpose convolution
+    if int(1 / stride) > 1:
+        stride = int(1 / stride)
+        return nn.ConvTranspose2d(
+            in_planes, out_planes, kernel_size=stride, stride=stride,bias=False)
 
     return nn.Conv2d(
         in_planes, out_planes, kernel_size=1, stride=int(stride), bias=False)

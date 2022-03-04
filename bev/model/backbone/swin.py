@@ -15,8 +15,9 @@ import os.path as osp
 
 from typing import Optional
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from fpn import FPN
+from bev.model.backbone.fpn import FPN
 
+from bev.utils import instantiate_from_config
 
 def get_ckpt_base_path():
     return osp.join(os.environ["TORCH_HOME"], "checkpoints", "SwinTransformer", "ObjectDetection")
@@ -619,13 +620,89 @@ class SwinTransformer(nn.Module):
                 out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
         
-        print([out.shape for out in outs])
         return tuple(outs)
 
     def train(self, mode=True):
         """Convert the model into training mode while keep layers freezed."""
         super(SwinTransformer, self).train(mode)
         self._freeze_stages()
+
+class SwinFPN(nn.Module):
+
+    def __init__(self, 
+                swin_config=None,
+                variant=None,
+                pretrained_path=None):
+        super().__init__()
+        if swin_config == None and variant == None:
+            raise Exception("Either config or variant must be declared!")
+
+        if variant is not None:
+            self.swin = SwinTransformer(**self._get_variant(variant))
+        else:
+            self.swin = instantiate_from_config(swin_config)
+
+        fpn_in_channels = [self.swin.embed_dim * 2 ** i for i in range(self.swin.num_layers)]
+
+        self.fpn = FPN(
+            in_channels=fpn_in_channels,
+            out_channels=256,
+            num_outs=5
+        )
+
+        if pretrained_path is not None:
+            assert osp.exists(pretrained_path), f"Checkpoint not found at '{pretrained_path}'"
+        # print("Restoring from: ", ckpt_path)
+
+            ckpt = torch.load(pretrained_path)["state_dict"]
+            ckpt_bb = {k[len("backbone."):]: v for k, v in ckpt.items() if k.startswith("backbone")}
+            self.swin.load_state_dict(ckpt_bb, strict=True)
+
+            ckpt_neck = {k[len("neck."):]: v for k, v in ckpt.items() if k.startswith("neck")}
+            self.fpn.load_state_dict(ckpt_neck, strict=True)
+        self.backbone = nn.Sequential(self.swin, self.fpn)
+
+    def forward(self, x):
+        return self.backbone(x)
+
+    def _get_variant(self,variant):
+        assert variant in ["small", "tiny", "base"]
+        configs = {
+            "small": {
+                "embed_dim": 96,
+                "depths": [2, 2, 18, 2],
+                "num_heads": [3, 6, 12, 24],
+                "window_size": 7,
+                "ape": False,
+                "drop_path_rate": 0.2,
+                "patch_norm": True,
+                "use_checkpoint": False
+            },
+
+            "tiny": {
+                "embed_dim": 96,
+                "depths":[2, 2, 6, 2],
+                "num_heads": [3, 6, 12, 24],
+                "window_size": 7,
+                "ape": False,
+                "drop_path_rate": 0.2,
+                "patch_norm": True,
+                "use_checkpoint": False
+            },
+
+            "base": {
+                "embed_dim": 128,
+                "depths": [2, 2, 18, 2],
+                "num_heads": [4, 8, 16, 32],
+                "window_size": 7,
+                "ape": False,
+                "drop_path_rate": 0.3,
+                "patch_norm": True,
+                "use_checkpoint": False
+            }
+        }
+        return configs[variant]
+
 
 
 def build_swin_fpn(variant: str, pretrained: bool, ckpt_type: Optional[str] = None):

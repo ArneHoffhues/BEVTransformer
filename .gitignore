@@ -2,6 +2,14 @@
 __pycache__/
 *.py[cod]
 
+#swap-files
+*.swp
+*.swo
+
+#others
+pretrained/
+logs/
+
 # C extensions
 *.so
 
