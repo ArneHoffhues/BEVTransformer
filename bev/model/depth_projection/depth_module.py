@@ -66,12 +66,19 @@ class GridAssembler(nn.Module):
             cell_counts = grid_cells.unique(return_counts=True)
             #cell_counts = torch.bincount(grid_cells)
             density_grid[i, cell_counts[0]] = cell_counts[1].float()
-            density_grid[i] = torch.clamp(density_grid[i], 0., self.max_num_pix_per_cell)
-            density_grid[i] /= (self.max_num_pix_per_cell + GridAssembler._EPSILON)
+            #density_grid[i] = torch.clamp(density_grid[i], 0., self.max_num_pix_per_cell)
+            #density_grid[i] /= (self.max_num_pix_per_cell + GridAssembler._EPSILON)
 
         density_grid.requires_grad = True
         density_grid = density_grid.reshape(B, grid_dim[0], grid_dim[1]).unsqueeze(1).contiguous()
         
+        division_values = [20, 20, 20, 15, 10, 8, 4, 2, 1, 1]
+        slice_size = density_grid.shape[2] // len(division_values)
+        max_values = torch.tensor([self.max_num_pix_per_cell // div_value for div_value in division_values], dtype=density_grid.dtype,  
+                device = density_grid.device, requires_grad = False)
+        max_values = max_values[:, None].repeat(1, slice_size).reshape(1, 1, -1, 1).contiguous()
+        density_grid = torch.min(density_grid, max_values)
+        density_grid /= max_values + GridAssembler._EPSILON
         return density_grid
 
 

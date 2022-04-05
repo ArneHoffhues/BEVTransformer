@@ -3,32 +3,21 @@ data:
   params:
     batch_size: 1
     validation:
-      target: bev.data.kitti_bev.KITTIBEVValidation
+      target: bev.data.kitti360_bev.KITTI360BEVValidation
       params:
-        rgb_root: /globalwork/data/KITTI_odometry_color/dataset/sequences/
-        bev_root: /home/hoffhues/BEV_data/sequences
-        depth_root: /home/hoffhues/KITTI_images/depth/
-        n_labels: 11
-        split: ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10']
+        rgb_root: /globalwork/data/KITTI-360
+        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        depth_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        n_labels: 10
         preprocess_param:
-          crop_region: [300, 580, 1300, 1580]
-          flip_prob: 0.0
           rgb_size: [384, 1408]
           bev_size: [676, 676]
-        mapping_param:
-          unique_ids: [0, 40, 48, 50, 51, 70, 72, 30, 31, 10, 18]
-          remaps:
-            _44: 1
-            _154: 7
-            _32: 8
-            _11: 8
-            _15: 8
-            _153: 8
-            _155: 8
-            _152: 9
-            _13: 10
-            _157: 10
-            _158: 10      
+          bottom_crop_augmentation_prob: 0.
+          side_crop_augmentation_prob: 0.
+          rotate_augmentation_prob: 0.
+          flip_prob: 0.
+          brightness_factor: 0
+          contrast_factor: 0 
 
 eval:
   n_classes: 10

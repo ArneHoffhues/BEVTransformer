@@ -40,30 +40,28 @@ class SamplingTransformer(nn.Module):
 
         #TODO add positional encoding
 
-    def forward(self, f):
+    def forward(self, f, init, init_pos, height_pos):
         
         B, C, D, X, Y = f.shape
         assert (D, X) == self.config.bev_grid_size
         f = f.permute(0, 2, 3, 4, 1).contiguous().view(B, D * X, Y, C)
-        
-        #init_level = torch.tensor([self.config.initialization_level], dtype=torch.float32)
-        init_level = self.config.initialization_level
-        #vert_samples = torch.linspace(self.config.vertical_sampling_range[0], self.config.vertical_sampling_range[1], self.config.n_samples_vertical)
-        vert_samples = torch.linspace(self.config.vertical_sampling_range[0], self.config.vertical_sampling_range[1], self.config.n_samples_vertical, device=f.device)
-        assert init_level >= vert_samples[0] and init_level < vert_samples[-1]
-        
-        init_index = torch.searchsorted(vert_samples, init_level)
-        
-        x = f[:, :, init_index, :].clone().detach().squeeze(2)
+        if height_pos is not None:
+            height_pos = height_pos.permute(0, 2, 3, 4, 1).view(B, D * X, Y, C)
+
+        B, C, D, X = init.shape
+        assert (D, X) == self.config.bev_grid_size
+        init = init.permute(0, 2, 3, 1).contiguous().view(B, D * X, C)
+        if init_pos is not None:
+            init_pos = init_pos.permute(0, 2, 3, 1).contiguous().view(B, D * X, C)
 
         for layer in self.layers:
-            x = layer(x, f)
+            x = layer(init, f, init_pos, height_pos)
 
         if self.norm is not None:
             x = self.norm(x)
         
         H, W = self.config.bev_grid_size
-        x = x.view(B, H, W, self.config.n_embed).permute(0, 3, 1, 2)
+        x = x.view(B, H, W, self.config.n_embed).permute(0, 3, 1, 2).contiguous()
         return x
 
 class TransformerLayer(nn.Module):
@@ -104,15 +102,18 @@ class TransformerLayer(nn.Module):
         self.dropout1 = nn.Dropout(config.resid_pdrop)
         self.dropout2 = nn.Dropout(config.resid_pdrop)
         self.dropout3 = nn.Dropout(config.resid_pdrop)
+    
+    def with_pos_embed(self, x, pos):
+        return x if pos is None else x + pos
 
-    def forward(self, x, f):
+    def forward(self, x, f, x_pos, f_pos):
         x = self.norm1(x)
-        res = self.cross_attn(x, f, f)
+        res = self.cross_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(f, f_pos), f)
         x = self.norm2(x + self.dropout1(res))
-        res = self.ray_attn(x, x, x)
+        res = self.ray_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(x, x_pos), x)
         x = self.norm3(x + self.dropout2(res))
         #res = self.neighbourhood_attn(x, x, x, attn_mask = self.neighbourhood_mask)[0]
-        res = self.neighbourhood_attn(x, x, x)
+        res = self.neighbourhood_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(x, x_pos), x)
         x = self.norm4(x + self.dropout3(res))
         x = self.norm5(x + self.mlp(x))
         return x
@@ -154,7 +155,7 @@ class SampleAttentionModule(nn.Module):
             points = self.grid.unsqueeze(0).repeat((B, 1, 1, 1))
             sampled_key = F.grid_sample(sample_inp, points, padding_mode='zeros', align_corners = True)
 
-            sampled_key = sampled_key.permute(0, 2, 3, 1)
+            sampled_key = sampled_key.permute(0, 2, 3, 1).contiguous()
             
             if torch.all(key.eq(value)):
                 sampled_value = sampled_key
@@ -164,7 +165,7 @@ class SampleAttentionModule(nn.Module):
                 else:
                     sample_inp = value
                 sampled_value = F.grid_sample(sample_inp, points, padding_mode='zeros')
-                sampled_value = sampled_value.permute(0, 2, 3, 1)
+                sampled_value = sampled_value.permute(0, 2, 3, 1).contiguous()
         else:
             sampled_key = key
             sampled_value = value
@@ -207,14 +208,10 @@ class SegAndDensityTransformer(nn.Module):
         self.layers = _get_clones(self.layer, num_layers)
         self.norm = nn.LayerNorm(n_embed) if normalize_before else None
 
-        self.density_conv1 = nn.Conv2d(1, n_embed // 2, kernel_size = 3, stride = 1, padding=1)
-        self.density_norm1 = nn.GroupNorm(16, n_embed // 2)
-        self.density_conv2 = nn.Conv2d(n_embed // 2, n_embed, kernel_size = 3, stride = 1, padding=1)
-        self.density_norm2 = nn.GroupNorm(16, n_embed)
+        self.density_encoder = DensityEncoder(n_embed)
 
     def forward(self, x, density, x_pos, density_pos):
-        density = self.density_norm1(self.density_conv1(density))
-        density = self.density_norm2(self.density_conv2(density))
+        density = self.density_encoder(density)
 
         B, C, D, X = x.shape
         assert (D, X) == self.config.bev_grid_size
@@ -231,6 +228,27 @@ class SegAndDensityTransformer(nn.Module):
         H, W = self.config.bev_grid_size
         x = x.view(B, H, W, self.config.n_embed).permute(0, 3, 1, 2)
         return x, density
+
+class DensityEncoder(nn.Module):
+    
+    def __init__(self, out_channels, layers = [2, 2, 2, 2], dilation = 2, blocktype = 'basic'):
+        super().__init__()
+        modules = list()
+        channels = [1]
+        channels += [out_channels // (2 **i) for i in reversed(range(len(layers)))]
+        for i in range(len(layers)):
+
+            # Add a new residual layer
+            module = ResNetLayer(channels[i],
+                    channels[i+1], layers[i], dilation=dilation, blocktype=blocktype)
+            modules.append(module)
+        
+        self.encoder = nn.Sequential(*modules)
+
+    def forward(self, density_grid):
+
+        return self.encoder(density_grid)
+
 
 class SegAndDensityTransformerLayer(nn.Module):
 
@@ -250,7 +268,7 @@ class SegAndDensityTransformerLayer(nn.Module):
                 nn.Dropout(config.resid_pdrop),
                 nn.Linear(config.dim_feedforward, config.n_embed),
                 nn.Dropout(config.resid_pdrop))
-        self.resnet_layer = ResNetLayer(config.n_embed, config.n_embed, 1, blocktype= 'basic')
+        self.resnet_layer = ResNetLayer(config.n_embed, config.n_embed, 2, dilation = 2, blocktype= 'basic')
 
         if config.normalize_before:
             self.norm1 = nn.LayerNorm(config.n_embed)

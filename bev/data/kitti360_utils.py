@@ -5,6 +5,12 @@ import umsgpack
 import albumentations
 import cv2
 
+KITTI360_PRIORS = {'road': 0.0941188385741217, 'sidewalk': 0.026268183983267794, 'building': 0.0355381876710453,
+        'wall': 0.002313814970573897, 'vegetation': 0.09904127112902396, 'terrain': 0.020731227891930038,
+        'occlusion': 0.07619888823029188, 'person': 6.181855424659398e-05, 'rider': 0.00014637805133941133, 
+        'car': 0.013348556878146145, 'truck': 0.0009033073973159896, 'ignore': 0.6313295266686972}
+
+
 class CropAugmentation():
     
     _EPSILON = -1e-6
@@ -152,7 +158,7 @@ class CropAugmentation():
         mid_distance = np.abs(np.arange(bev.shape[1]) - bev.shape[1] // 2)
         mid_distance = np.expand_dims(mid_distance, axis = 0)
         mask = mask / (mid_distance + CropAugmentation._EPSILON)
-        mask_bool = np.logical_and(mask <= (z_space / x_space), mask >= 0)
+        mask_bool = np.logical_and(mask <= np.abs(z_space / x_space), mask >= 0)
         bev[mask_bool] = self.ignore_index
 
         if do_left_side:
@@ -293,7 +299,7 @@ class RotateAugmentation():
 
         fov_x = 2 * np.arctan(rgb_size[1] / (2 * intrinsics[0][0]))
         half_angle = fov_x /2
-        line_len = (bev_rotated.shape[1] // 2 * np.sin(half_angle)) / np.sin(90 - half_angle)
+        line_len = (bev_rotated.shape[1] // 2 * np.sin(np.radians(90) - half_angle)) / np.sin(half_angle)
         intersect = bev_rotated.shape[0] - line_len
 
         distance_z = np.arange(bev_rotated.shape[0])

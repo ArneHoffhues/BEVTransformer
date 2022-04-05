@@ -40,7 +40,7 @@ def construct_ray_attention_grid(bev_grid_size, n_samples):
 
     samples_x = W / 2 + (intersections[:, :, 0].unsqueeze(-1) - W / 2) * samples_enum[None, None, :]
     samples_y = H - (H - intersections[:, :, 1].unsqueeze(-1)) * samples_enum[None, None, :]
-    samples = torch.stack([samples_x, samples_y], dim = -1)
+    samples = torch.stack([samples_y, samples_x], dim = -1)
 
     grid = samples - torch.tensor([W/2, H/2]).float()
     grid = torch.div(grid, torch.tensor([W/2, H/2]).float())
@@ -52,32 +52,36 @@ def construct_ray_attention_grid(bev_grid_size, n_samples):
 def construct_ray_attention_grid_corners_aligned(bev_grid_size, n_samples):
     H, W = bev_grid_size
 
-    xx, yy = torch.meshgrid([torch.arange(W), torch.arange(H)])
-    xx = xx 
-    yy = yy 
+    xx, zz = torch.meshgrid([torch.arange(W), torch.arange(H)])
 
     orig_p = ((W - 1) /2, H - 1)
-    m = (xx - orig_p[0]) / (orig_p[1] - yy)
+    m = (xx - orig_p[0]) / (orig_p[1] - zz)
     int_x = m * (H - 1) + (W - 1) / 2
     int_x[(int_x > (W - 1)) | (int_x < 0)] = -1
-    int_y = torch.zeros((W, H), dtype=torch.float32) - 1
-    int_y[int_x == -1] = ((H - 1) - (1 / m) * torch.sign(m) * ((W - 1) / 2))[int_x == -1]
+    int_z = torch.zeros((W, H), dtype=torch.float32) - 1
+    int_z[int_x == -1] = ((H - 1) - (1 / m) * torch.sign(m) * ((W - 1) / 2))[int_x == -1]
     intersections = torch.zeros((W, H, 2), dtype =torch.float32)
     zeros = torch.zeros((W, H), dtype = torch.float32)
     intersections[int_x != -1, :] = torch.stack([int_x[int_x != -1], zeros[int_x != -1]], dim = -1)
-    cond_right = (int_y != -1) & (xx > (W - 1) / 2)
-    cond_left = (int_y != -1) & (xx < (W - 1) / 2)
-    intersections[cond_right] = torch.stack([zeros[cond_right] + W - 1, int_y[cond_right]], dim =-1)
-    intersections[cond_left] = torch.stack([zeros[cond_left], int_y[cond_left]], dim =-1)
+    cond_right = (int_z != -1) & (xx > (W - 1) / 2)
+    cond_left = (int_z != -1) & (xx < (W - 1) / 2)
+    intersections[cond_right] = torch.stack([zeros[cond_right] + W - 1, int_z[cond_right]], dim =-1)
+    intersections[cond_left] = torch.stack([zeros[cond_left], int_z[cond_left]], dim =-1)
 
-    samples_enum = torch.arange(n_samples) / n_samples
+    samples_enum = torch.arange(n_samples) / (n_samples - 1)
 
     samples_x = (W - 1) / 2 + (intersections[:, :, 0].unsqueeze(-1) - (W - 1) / 2) * samples_enum[None, None, :]
-    samples_y = H - 1 - (H - 1 - intersections[:, :, 1].unsqueeze(-1)) * samples_enum[None, None, :]
-    samples = torch.stack([samples_x, samples_y], dim = -1)
+    samples_z = H - 1 - (H - 1 - intersections[:, :, 1].unsqueeze(-1)) * samples_enum[None, None, :]
+    samples = torch.stack([samples_z, samples_x], dim = -1)
 
-    grid = samples - torch.tensor([(W - 1)/2, (H - 1)/2]).float()
-    grid = torch.div(grid, torch.tensor([(W - 1)/2, (H - 1)/2]).float())
+    if (W - 1) % 2 == 0:
+        samples_x = torch.tensor([(W - 1) / 2]).repeat(H, n_samples)
+        samples_z = ((H - 1) * samples_enum)[None, :].repeat(H, 1)
+        samples_vertical_line = torch.stack([samples_z, samples_x], dim = -1)
+        samples[int((W - 1) / 2)] = samples_vertical_line
+
+    grid = samples - torch.tensor([(H - 1)/2, (W - 1)/2]).float()
+    grid = torch.div(grid, torch.tensor([(H - 1)/2, (W - 1)/2]).float())
     assert ((grid >= -1) & (grid <=1)).all()
     grid = grid.transpose(0, 1).contiguous()
     grid.requires_grad = False

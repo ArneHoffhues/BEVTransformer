@@ -18,6 +18,7 @@ class BEVTransformer(pl.LightningModule):
                  n_embed,
                  class_names=None,
                  pos_encoding_config = None,
+                 height_pos_encoding_config = None,
                  transformer_config=None,
                  backbone_config=None,
                  net3d_config=None,
@@ -47,6 +48,13 @@ class BEVTransformer(pl.LightningModule):
 
         if pos_encoding_config is not None:
             self.pos_encoding = instantiate_from_config(config=pos_encoding_config)
+        else:
+            self.pos_encoding = None
+
+        if height_pos_encoding_config is not None:
+            self.height_pos_encoding = instantiate_from_config(config=height_pos_encoding_config)
+        else:
+            self.height_pos_encoding = None
 
         if transformer_config is not None:
             self.transformer = instantiate_from_config(config=transformer_config)
@@ -76,8 +84,10 @@ class BEVTransformer(pl.LightningModule):
     
     def forward(self, x, cam):
         f = self.backbone(x)
-        f_3d = self.net3d(f, cam)
-        out = self.transformer(f_3d)
+        f_3d, init = self.net3d(f, cam)
+        init_pos = self.pos_encoding(init) if self.pos_encoding else None
+        height_pos = self.height_pos_encoding(f_3d) if self.height_pos_encoding else None
+        out = self.transformer(f_3d, init, init_pos, height_pos)
         out = self.decoder(out)
 
         return out
@@ -92,7 +102,6 @@ class BEVTransformer(pl.LightningModule):
                     del sd[k]
         self.load_state_dict(sd, strict=False)
         print(f"Restored from {path}")
-
 
     def get_input(self, key, batch):
         x = batch[key]
@@ -271,6 +280,110 @@ class BEVTransformer(pl.LightningModule):
         x = 2.*(x-x.min())/(x.max()-x.min()) - 1.
         return x
 
+class BEVTransformerWithDepth(BEVTransformer):
+    def __init__(self,
+                 loss_config,
+                 n_labels,
+                 n_embed,
+                 class_names=None,
+                 pos_encoding_config = None,
+                 height_pos_encoding_config = None,
+                 transformer_config=None,
+                 backbone_config=None,
+                 net3d_config=None,
+                 decoder_config = None,
+                 colorize=None,
+                 ckpt_path=None,
+                 ignore_index = None,
+                 rgb_key = 'image',
+                 bev_key = 'bev',
+                 cam_key = 'cam',
+                 mask_key = 'mask',
+                 depth_key = 'depth'
+                 ):
+        super().__init__(loss_config=loss_config, n_labels=n_labels, n_embed=n_embed, class_names=class_names, pos_encoding_config=pos_encoding_config,
+                height_pos_encoding_config=height_pos_encoding_config, transformer_config=transformer_config, backbone_config=backbone_config, net3d_config=net3d_config,
+                decoder_config=decoder_config, colorize=colorize, ckpt_path=ckpt_path, ignore_index=ignore_index, rgb_key=rgb_key, cam_key=cam_key, mask_key=mask_key)
+        self.depth_key = depth_key
+        
+    def get_inputs(self, batch, N=None):
+        x = self.get_input(self.rgb_key, batch)
+        bev = self.get_input(self.bev_key, batch)
+        depth = self.get_input(self.depth_key, batch)
+        cam = batch[self.cam_key].float()
+        mask = batch[self.mask_key]
+        if N is not None:
+            x = x[:N]
+            bev = bev[:N]
+            cam = cam[:N]
+            mask = mask[:N]
+            depth = depth[:N]
+        return x, bev, cam, mask, depth
+    
+    def forward(self, x, cam, depth):
+        f = self.backbone(x)
+        f_3d, init = self.net3d(f, cam, depth)
+        init_pos = self.pos_encoding(init) if self.pos_encoding else None
+        height_pos = self.height_pos_encoding(f_3d) if self.height_pos_encoding else None
+        out = self.transformer(f_3d, init, init_pos, height_pos)
+        out = self.decoder(out)
+
+        return out
+
+    def shared_step(self, batch, batch_idx, split):
+        x, bev, cam, mask, depth = self.get_inputs(batch)
+        logits, vis_logits = self(x, cam, depth)
+
+        if isinstance(self.loss, CombinedLoss):
+            loss, loss_dict = self.loss(logits, vis_logits, bev, mask, cam, split)
+        else:
+            loss, loss_dict = self.loss(logits, bev, mask, split)
+
+        #loss, loss_dict = self.loss(logits, bev, mask, split)
+
+        pred = self.logits_to_one_hot(logits)
+        bev = self.labels_to_one_hot(bev)
+
+        if self.ignore_index is None:
+            conf_mat_mask = mask.bool()
+        else:
+            bev, conf_mat_mask = bev[:, :-1, :, :], ~bev[:,-1, :, :].bool()
+
+        return loss, loss_dict, pred, bev, conf_mat_mask
+
+    def log_images(self, batch, **kwargs):
+        N = 4
+
+        log = dict()
+        x, bev_gt, cam, mask, depth = self.get_inputs(batch, N)
+        x = x.to(self.device)
+        cam = cam.to(self.device)
+        depth = depth.to(self.device)
+        bev, vis_prediction = self(x, cam, depth)
+        #colorize
+        assert bev.shape[1] == self.n_labels
+        # convert logits to indices
+        bev = torch.argmax(bev, dim=1, keepdim=True)
+        if self.ignore_index is None:
+            bev = F.one_hot(bev, num_classes=self.n_labels)
+        else:
+            bev = F.one_hot(bev, num_classes = self.n_labels + 1)
+            ignore_region = bev_gt == self.ignore_index
+            bev_non_hall = bev.clone().detach()
+            bev_non_hall[:, :, :, :, -1][ignore_region] = 1
+            bev_non_hall[:, :, :, :, :-1][ignore_region, :] = 0
+            bev_non_hall = bev_non_hall.squeeze(1).permute(0, 3, 1, 2).float()
+            bev_non_hall = self.to_rgb(bev_non_hall)
+            log["bev_not_hallucinated"] = bev_non_hall
+        bev = bev.squeeze(1).permute(0, 3, 1, 2).float()
+        bev = self.to_rgb(bev)
+        log["inputs"] = x
+        if self.ignore_index is not None:
+            bev_gt = self.labels_to_one_hot(bev_gt).float()
+        log["bev_gt"] = self.to_rgb(bev_gt)
+        log["bev_hallucinated"] = bev
+        return log
+
 class NoTransformer(BEVTransformer):
     def __init__(self,
                  transformer_config,
@@ -336,7 +449,7 @@ class DepthAndSegUpsampler(BEVTransformer):
         self.depth_projection = instantiate_from_config(config = depth_module_config)
         self.decoder = instantiate_from_config(config = decoder_config)
 
-    def forward(self, x, depth, cam):
+    def forward(self, x, cam, depth):
         seg = self.seg_network(x)
         projected_seg, _  = self.depth_projection(seg, depth, cam)
         logits, vis_logits = self.decoder(projected_seg)
@@ -367,7 +480,7 @@ class DepthAndSegUpsampler(BEVTransformer):
    
     def shared_step(self, batch, batch_idx, split):
         x, bev, depth, cam, mask = self.get_inputs(batch)
-        logits, vis_logits = self(x, depth, cam)
+        logits, vis_logits = self(x, cam, depth)
         
         if isinstance(self.loss, CombinedLoss):
             loss, loss_dict = self.loss(logits, vis_logits, bev, mask, cam, split)
@@ -392,7 +505,7 @@ class DepthAndSegUpsampler(BEVTransformer):
         x = x.to(self.device)
         cam = cam.to(self.device)
         depth = depth.to(self.device)
-        bev, vis_prediction = self(x, depth, cam)
+        bev, vis_prediction = self(x, cam, depth)
         #colorize
         assert bev.shape[1] == self.n_labels
         # convert logits to indices
@@ -446,7 +559,7 @@ class DepthAndSegTransformer(DepthAndSegUpsampler):
                 colorize = colorize, ckpt_path = ckpt_path, class_names = class_names)
         self.density_pos_encoding = instantiate_from_config(config = density_pos_encoding_config)
         
-    def forward(self, x, depth, cam):
+    def forward(self, x, cam, depth):
         seg = self.seg_network(x)
         projected_seg, density  = self.depth_projection(seg, depth, cam)
         seg_pos = self.pos_encoding(projected_seg)

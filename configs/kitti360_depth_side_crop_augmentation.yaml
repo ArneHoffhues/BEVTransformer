@@ -50,7 +50,7 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 2
+    batch_size: 5
     num_workers: 8
     train:
       target: bev.data.kitti360_bev.KITTI360BEVTrain

@@ -39,6 +39,40 @@ class PositionEmbeddingSine(nn.Module):
         pos.requires_grad = False
         return pos
 
+class PositionEmbeddingSineHeight(nn.Module):
+    """
+    This is a more standard version of the position embedding, very similar to the one
+    used by the Attention is all you need paper, generalized to work on images.
+    """
+    def __init__(self, num_pos_feats=256, temperature=10000, normalize=False, scale=None):
+        super().__init__()
+        self.num_pos_feats = num_pos_feats
+        self.temperature = temperature
+        self.normalize = normalize
+        if scale is not None and normalize is False:
+            raise ValueError("normalize should be True if scale is passed")
+        if scale is None:
+            scale = 2 * math.pi
+        self.scale = scale
+
+    def forward(self, x):
+        
+        B, C, D, X, Y = x.shape
+        embed = torch.arange(Y, dtype = torch.float32, device = x.device)[None, None, None, :].repeat(B, D, X, 1) + 1
+        if self.normalize:
+            eps = 1e-6
+            embed = embed / (embed[:, :, :, -1:] + eps) * self.scale
+
+        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
+        dim_t = self.temperature ** (2 * torch.div(dim_t, 2, rounding_mode='floor') / self.num_pos_feats)
+
+        pos = embed[:, :, :, :, None] / dim_t
+        pos = torch.stack((pos[:, :, :, :, 0::2].sin(), pos[:, :, :,:,  1::2].cos()), dim=5).flatten(4)
+        pos = pos.permute(0, 4, 1, 2, 3)
+        pos.requires_grad = False
+        return pos
+
+
 class PositionEmbeddingLearned(nn.Module):
     """
     Absolute pos embedding, learned.

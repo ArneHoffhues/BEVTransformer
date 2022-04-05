@@ -35,14 +35,16 @@ class Decoder(nn.Module):
             strides=[1, 2, 2, 2], blocktype='basic', final_res=None):
         super().__init__()
         self.predict_vis = predict_vis
-        self.final_res = tuple(final_res)
 
         self.upsample = UpsampleNetwork(in_channels, layers,
                 strides, blocktype)
         
         if final_res is not None:
+            self.final_res = tuple(final_res)
             self.conv_after_interpolation = torch.nn.Conv2d(self.upsample.out_channels, self.upsample.out_channels, 
                     kernel_size = 3, stride = 1, padding = 1)
+        else:
+            self.final_res = None
 
         self.conv_final = nn.Conv2d(self.upsample.out_channels, num_classes, 
                 kernel_size = 1, stride = 1)

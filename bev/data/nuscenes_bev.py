@@ -1,179 +1,204 @@
+import numpy as np
+import os
 import albumentations
 from PIL import Image
-import numpy as np
-import torch
-from torchvision.transforms.functional import to_tensor
 from torch.utils.data import Dataset
-from bev.data.nuscenes_utils import NUSCENES_TRAIN_SCENES, NUSCENES_VAL_SCENES, NUSCENES_CAMERA_NAMES, iterate_nuscenes_samples
-from nuscenes import NuScenes
-import os
-import random
+import cv2
+import json
+import umsgpack
+from bev.data.kitti360_utils import CropAugmentation, RotateAugmentation
 
-class NuscenesSegmentationBase(Dataset):
-    def __init__(self, nuscenes_path, label_path, split, dataset_size = None, nuscenes_version='v1.0-trainval', 
-            preprocess_param = None, mapping_param = None, n_labels = 7):
-        super().__init__()
+class NuScenesBEVBase(Dataset):
+    
+    _IMG_DIR = "img"
+    _BEV_MSK_DIR = "bev_msk"
+    _WEIGHTS_MSK_DIR = "class_weights"
+    _BEV_DIR = "bev_ortho"
+    _LST_DIR = "split"
+    _METADATA_FILE = "metadata_ortho.bin"
+    _DEPTH_SCALE_FACTOR = 256
 
+    def __init__(self, rgb_root, bev_root, depth_root = None, with_depth = False, max_depth = 80., 
+            n_labels = 9, preprocess_param = None, mapping_param = None, split = None):
+        self.split = split
+        self.rgb_root = rgb_root
+        self.bev_root = bev_root
         self.n_labels = n_labels
-        self.nuscenes = NuScenes(nuscenes_version, nuscenes_path)
+        self.rgb_cameras = ['front']
+        self.with_depth = with_depth
+
+        if with_depth:
+            assert depth_root is not None
+            self.depth_root = depth_root
+            self.max_depth = max_depth
         
-        assert split in ["train", "val"]
-        if split == "train":
-            scene_names = NUSCENES_TRAIN_SCENES
-        else:
-            scene_names = NUSCENES_VAL_SCENES
-        self.label_path = label_path
-        self.labels = self.get_tokens(scene_names)
+        self.img_dir = os.path.join(bev_root, NuScenesBEVBase._IMG_DIR)
+        self.bev_msk_dir = os.path.join(bev_root, NuScenesBEVBase._BEV_MSK_DIR, KITTI360BEVBase._BEV_DIR)
+        self.weights_msk_dir = os.path.join(bev_root, NuScenesBEVBase._WEIGHTS_MSK_DIR)
+        self.lst_dir = os.path.join(bev_root, NuScenesBEVBase._LST_DIR)
 
-        if dataset_size is None:
-            self.dataset_size = len(self.labels)
-        else:
-            assert dataset_size <= len(self.labels)
-            self.dataset_size = dataset_size
-        self.shuffle_samples()
-
-        self.crop_region = [150, 0, 650, 500] if preprocess_param is None else preprocess_param['crop_region']
-        self.flip_prob = 0.5 if preprocess_param is None else preprocess_param['flip_prob']
-        self.rgb_size = (400, 800) if preprocess_param is None else preprocess_param['rgb_size']
-        self.bev_size = (25, 25) if preprocess_param is None else preprocess_param['bev_size']
+        self.crop_region = [123, 105, 773, 755] if preprocess_param is None or 'crop_region' not in preprocess_param \
+                else preprocess_param['crop_region']
+        self.flip_prob = 0.5 if preprocess_param is None or 'flip_prob' not in preprocess_param \
+                else preprocess_param['flip_prob']
+        self.rgb_size = (448, 768) if preprocess_param is None or 'rgb_size' not in preprocess_param \
+                else preprocess_param['rgb_size']
+        self.bev_size = (200, 200) if preprocess_param is None or 'bev_size' not in preprocess_param \
+                else preprocess_param['bev_size']
+        self.brightness_factor = 0.2 if preprocess_param is None or 'brightness_factor' not in preprocess_param \
+                else preprocess_param['brightness_factor']
+        self.contrast_factor = 0.2 if preprocess_param is None or 'contrast_factor' not in preprocess_param \
+                else preprocess_param['contrast_factor']
+        self.saturation_factor = 0 if preprocess_param is None or 'saturation_factor' not in preprocess_param \
+                else preprocess_param['saturation_factor']
+        self.hue_factor = 0 if preprocess_param is None or 'hue_factor' not in preprocess_param \
+                else preprocess_param['hue_factor']
 
         #id mapping
-        self.unique_ids = [0, 2, 4, 5, 6, 9] if mapping_param is None else mapping_param['unique_ids']
-        assert len(self.unique_ids) + 1 == self.n_labels
-        self.id_map = np.nan * np.ones((15))
-        self.id_map[self.unique_ids] = np.arange(len(self.unique_ids)) + 1
+
+        self.unique_ids = [0, 1, 2, 3, 4, 6, 7, 8, 9] \
+                if mapping_param is None else mapping_param['unique_ids']
+        assert len(self.unique_ids) == self.n_labels
+        self.id_map = np.ones((256)) * 255
+        self.id_map[self.unique_ids] = np.arange(len(self.unique_ids))
         if mapping_param is not None:
             for k,v in mapping_param['remaps'].items():
-                assert v in range(self.n_labels)
-                self.id_map[k] = v
-
+                k = int(k.replace("_", ""))
+                assert int(v) in range(self.n_labels)
+                self.id_map[k] = int(v)
+        
+        assert split in ['train', 'val']
+        self.meta, self.images, self.img_map = self._load_split(split) 
+    
         if self.crop_region is not None and len(self.crop_region) == 4:
             x_min, y_min, x_max, y_max = self.crop_region
             self.cropper = albumentations.Crop(x_min=x_min, y_min=y_min, x_max=x_max, y_max=y_max)
         else:
-            self.cropper =albumentations.CenterCrop(height= 800, width = 800)
+            self.cropper=albumentations.CenterCrop(height= 768, width = 896)
 
-        self.flip = albumentations.HorizontalFlip(p=self.flip_prob)
+        self.colorjitter = albumentations.ColorJitter(brightness = self.brightness_factor, contrast = self.contrast_factor,
+                saturation = self.saturation_factor, hue = self.hue_factor, always_apply = True)
+        self.flip = albumentations.HorizontalFlip(p = self.flip_prob)
 
-
-        if self.rgb_size is not None and self.bev_size is not None:
-            #self.rescaler = albumentations.SmallestMaxSize(max_size = self.size)
-            self.bev_rescaler = albumentations.Resize(*self.bev_size, interpolation=0)
-            self.rgb_rescaler = albumentations.Resize(*self.rgb_size)
-            self.vflip = albumentations.VerticalFlip(always_apply = True, p=1.0)
-            self.bev_preprocessor = albumentations.Compose([self.cropper, self.bev_rescaler, self.vflip], additional_targets={'mask': 'image'})
-            self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image'})
+        assert self.rgb_size is not None and self.bev_size is not None
+        #self.rescaler = albumentations.SmallestMaxSize(max_size = self.size)
+        self.bev_rescaler = albumentations.Resize(*self.bev_size, interpolation=0)
+        self.rgb_rescaler = albumentations.Resize(*self.rgb_size)
+        self.bev_preprocessor = albumentations.Compose([self.cropper, self.bev_rescaler])
+        if self.with_depth:
+            self.depth_rescaler = albumentations.Resize(*self.rgb_size, interpolation = 0)
+            self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image', 'depth': 'image'},
+                    keypoint_params=albumentations.KeypointParams(format='xy'))
         else:
-            self.preprocessor = lambda **kwargs: kwargs
-    
-    
-    def get_tokens(self, scene_names=None):
-        
-        self.tokens = list()
+            self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image'}, 
+                    keypoint_params=albumentations.KeypointParams(format='xy'))
 
-        # Iterate over scenes
-        for scene in self.nuscenes.scene:
-            
-            # Ignore scenes which don't belong to the current split
-            if scene_names is not None and scene['name'] not in scene_names:
-                continue
-             
-            # Iterate over samples
-            for sample in iterate_nuscenes_samples(self.nuscenes, 
-                                          scene['first_sample_token']):
-                
-                # Iterate over cameras
-                for camera in NUSCENES_CAMERA_NAMES:
-                    self.tokens.append(sample['data'][camera])
-        
-        return self.tokens
+    def _load_split(self, split):
+        with open(os.path.join(self.bev_root, NuScenesBEVBase._METADATA_FILE), "rb") as fid:
+            metadata = umsgpack.unpack(fid, encoding="utf-8")
 
+        with open(os.path.join(self.lst_dir, split + ".txt"), "r") as fid:
+            lst = fid.readlines()
+            lst = [line.strip() for line in lst]
 
-    def shuffle_samples(self):
-        self.samples = random.sample(self.labels, self.dataset_size) 
+        img_map = {}
+        for camera in self.rgb_cameras:
+            with open(os.path.join(self.img_dir, "{}.json".format(camera))) as fp:
+                map_list = json.load(fp)
+                map_dict = {k: v for d in map_list for k, v in d.items()}
+                img_map[camera] = map_dict
+
+        meta = metadata["meta"]
+        images = [img_desc for img_desc in metadata["images"] if img_desc["id"] in lst]
+
+        return meta, images, img_map
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.images)
 
-    def decode_binary_labels(self, labels, n_class=15):
-        bits = torch.pow(2, torch.arange(n_class))
-        return (labels & bits.view(-1,1,1)) > 0
-
-    def preprocess_image(self, sample):
-        token = sample
-        img_name = token + ".png"
-        labels = to_tensor(Image.open(os.path.join(self.label_path, img_name))).long()
-        labels = self.decode_binary_labels(labels)
-        bev, mask = labels[:-1], ~labels[-1].numpy().astype(np.uint8)
-    
-        idx = torch.LongTensor(self.unique_ids)
-        bev = bev.index_select(0, idx).numpy()
-
-        bev_composed = np.zeros(bev.shape[-2:], dtype=np.uint8)
-        for i in range(bev.shape[0]):
-            bev_composed[bev[i, :, :]] = i + 1
+    def preprocess_sample(self, img_desc):
+        bev_path = os.path.join(self.bev_msk_dir, "{}.png".format(img_desc['id']))
+        bev_img = Image.open(bev_path)
+        rotated = bev_img.rotate(90, expand = True)
+        bev_img = np.asarray(rotated).astype(np.uint8)
+        mapping = np.zeros(len(img_desc['cat'])).astype(np.uint8)
+        for i, cat in enumerate(img_desc['cat']):
+            mapping[i] = cat
+        bev_img = mapping[bev_img].astype(np.uint8)
+        bev_img = self.id_map[bev_img]
         
-        bev_preprocessed = self.bev_preprocessor(image = bev_composed, mask = mask)
-        bev = bev_preprocessed["image"]
-        mask = bev_preprocessed["mask"]
+        mask_path = os.path.join(self.weights_msk_dir, "{}.png".format(img_desc['id']))
+        weights_msk = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED).astype(float)
+        if weights_msk is not None:
+            weights_msk_combined = ((weights_msk[:, :, 0] + (weights_msk[:, :, 1] / 10000)) * 10000).astype(np.int32)
+        weight_mask = cv2.rotate(weights_msk_combined, cv2.ROTATE_90_COUNTERCLOCKWISE)    
 
-        rgb_img = np.asarray(Image.open(self.nuscenes.get_sample_data_path(token))).astype(np.uint8)
+        rgb_path = os.path.join(self.rgb_root, self.img_map['front']["{}.png".format(img_desc['id'])])
+        rgb_img = np.array(Image.open(rgb_path)).astype(np.uint8)
+        rgb_img = self.colorjitter(image = rgb_img)["image"]
+        H, W = rgb_img.shape[:2]
+        
+        if self.with_depth:
+            depth_path = os.path.join(self.depth_root, "{}_depth.png".format(img_desc['id']))
+            depth_img = np.array(Image.open(depth_path)).astype(np.uint16)
+            depth_img = depth_img / NuScenesBEVBase._DEPTH_SCALE_FACTOR
+        else:
+            depth_img = None
+
+        cam = np.array(img_desc['cam_intrinsic']).astype(np.float)
+        
+        bev_img = self.bev_preprocessor(image = bev_img)["image"]
+        mask = self.bev_preprocessor(image = weight_mask)["image"] 
         rgb_img = self.rgb_rescaler(image=rgb_img)["image"]
         rgb_img = (rgb_img/127.5 - 1.0).astype(np.float32)
-        preprocessed = self.preprocessor(image = rgb_img, bev = bev, mask =mask)
+        scaling_y, scaling_x = self.rgb_size[0] / H, self.rgb_size[1] / W
+        cam = np.array([cam[0] * scaling_x, cam[1] * scaling_y, cam[2]]).astype(float)
+        principal_point = [(cam[0,2], cam[1, 2])]
 
-        # Load camera intrinsics matrix
-        sample_data = self.nuscenes.get('sample_data', token)
-        sensor = self.nuscenes.get(
-            'calibrated_sensor', sample_data['calibrated_sensor_token'])
-        intrinsics = torch.tensor(sensor['camera_intrinsic'])
+        if self.with_depth:
+            depth_img = depth_img / self.max_depth
+            depth_img = self.depth_rescaler(image=depth_img)["image"]
+            preprocessed = self.preprocessor(image = rgb_img, bev = bev_img, mask =mask, depth = depth_img, keypoints=principal_point)
+        else:
+            preprocessed = self.preprocessor(image = rgb_img, bev = bev_img, mask =mask, keypoints=principal_point)
+        cx_flipped, cy_flipped = preprocessed['keypoints'][0]
+        cam[0,2] = cx_flipped
+        cam[1,2] = cy_flipped
 
-        # Scale calibration matrix to account for image downsampling
-        intrinsics[0] *= self.rgb_size[1] / sample_data['width']
-        intrinsics[1] *= self.rgb_size[0] / sample_data['height']
-        
         data = dict()
-        data["image"] =preprocessed["image"]
+        data["image"] = preprocessed["image"]
         data["mask"] = preprocessed["mask"]
-        data["cam"] = intrinsics.numpy()
+        data['cam'] = cam
+        data['bev'] = preprocessed["bev"]
 
-        # one-hot encoding
-        image = preprocessed["bev"]
-        flatseg = np.ravel(image).astype(int)
-        onehot = np.zeros((flatseg.size, self.n_labels), dtype=np.bool)
-        onehot[np.arange(flatseg.size), flatseg] = True
-        onehot = onehot.reshape(image.shape + (self.n_labels,)).astype(int)
-        image = onehot
-        data["bev"] = image
-
+        if self.with_depth:
+            data['depth'] = preprocessed['depth']
+        
         return data
 
     def __getitem__(self, i):
         example = dict()
-        data = self.preprocess_image(self.samples[i])
-        example["image"] = data["image"]
-        example["mask"] = data["mask"]
-        example["bev"] = data["bev"]
-        example["cam"] = data["cam"]
-        #example["sample"] = self.samples[i]
+        preprocessed = self.preprocess_sample(self.images[i])
+        example["image"] = preprocessed["image"]
+        example["mask"] = preprocessed["mask"]
+        example["bev"] = preprocessed["bev"]
+        example["cam"] = preprocessed["cam"]
+        if self.with_depth:
+            example['depth'] = preprocessed['depth']
         return example
 
-class NuscenesSegmentationTrain(NuscenesSegmentationBase):
-    def __init__(self, nuscenes_path, label_path, dataset_size = None, nuscenes_version='v1.0-trainval',
-            preprocess_param = None, mapping_param = None, n_labels = 7):
-        super().__init__(nuscenes_path=nuscenes_path, label_path=label_path, dataset_size=dataset_size,
-                nuscenes_version=nuscenes_version, preprocess_param=preprocess_param, mapping_param=mapping_param,
-                n_labels=n_labels, split = 'train')
+class NuScenesBEVTrain(NuScenesBEVBase):
+    def __init__(self, rgb_root, bev_root, depth_root = None, with_depth = False, max_depth = 80., n_labels = 9, preprocess_param = None, mapping_param = None):
+        super().__init__(rgb_root=rgb_root, bev_root = bev_root, depth_root = depth_root, with_depth = with_depth, max_depth = max_depth,
+                n_labels = n_labels, split = 'train', preprocess_param=preprocess_param, mapping_param=mapping_param)
 
     def get_split(self):
         return "train"
 
-class NuscenesSegmentationValidation(NuscenesSegmentationBase):
-    def __init__(self, nuscenes_path, label_path, dataset_size = None, nuscenes_version='v1.0-trainval',
-            preprocess_param = None, mapping_param = None, n_labels = 7):
-        super().__init__(nuscenes_path=nuscenes_path, label_path=label_path, dataset_size=dataset_size,
-                nuscenes_version=nuscenes_version, preprocess_param=preprocess_param, mapping_param=mapping_param,
-                n_labels=n_labels, split = 'val')
+class NuScenesBEVValidation(NuScenesBEVBase):
+    def __init__(self, rgb_root, bev_root, depth_root = None, with_depth = False, max_depth = 80.,n_labels = 9, preprocess_param = None, mapping_param = None):
+        super().__init__(rgb_root=rgb_root, bev_root = bev_root, depth_root = depth_root, with_depth = with_depth, max_depth = max_depth,
+                n_labels = n_labels, split = 'val', preprocess_param=preprocess_param, mapping_param=mapping_param)
 
     def get_split(self):
         return "validation"

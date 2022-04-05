@@ -32,9 +32,6 @@ def get_parser(**parser_kwargs):
     parser.add_argument(
         "--savename",
         type=str,
-        const=True,
-        default="",
-        nargs="?",
         help="name for save directory",
         required=True,
     )
@@ -47,13 +44,27 @@ def get_parser(**parser_kwargs):
         required=True,
     )
     parser.add_argument(
-        "-s",
-        "--seed",
-        type=int,
-        default=23,
-        help="seed for seed_everything",
+        "--ckpt",
+        type=str,
+        required=True,
+        help="path to checkpoint",
     )
-
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="kitti",
+        choices=["kitti", "kitti360"],
+        help="dataset to evaluate on",
+    )
+    parser.add_argument(
+        "-d",
+        "--depth",
+        type=str2bool,
+        const=True,
+        default=False,
+        nargs="?",
+        help="usage of depth",
+    )
     
     return parser
 
@@ -69,17 +80,6 @@ def instantiate_from_config(config):
         raise KeyError("Expected key `target` to instantiate.")
     return get_obj_from_str(config["target"])(**config.get("params", dict()))
 
-class WrappedDataset(Dataset):
-    """Wraps an arbitrary object with __len__ and __getitem__ into a pytorch dataset"""
-    def __init__(self, dataset):
-        self.data = dataset
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return self.data[idx]
-
 # Create color palette from color dictionary
 def palette_from_dict(c_dict):
     palette = []
@@ -93,18 +93,26 @@ def palette_from_dict(c_dict):
 if __name__ == "__main__":
     parser = get_parser()
     opt, unknown = parser.parse_known_args()
-    seed_everything(opt.seed)
     exp_name=opt.savename
+    with_depth = opt.depth
+    dataset = opt.dataset
 
-    config = OmegaConf.load(opt.config) 
-    model = instantiate_from_config(config.model)
+    config = OmegaConf.load(opt.config)
+    ckpt_path = opt.ckpt
+    model_config_path = os.path.join(os.getcwd(), ckpt_path, "configs")
+    project_file = [f for f in os.listdir(model_config_path) if f.endswith("project.yaml")][0]
+    model_config_path = os.path.join(model_config_path, project_file)
+    model_config = OmegaConf.load(model_config_path).model
+    model_config.params.ckpt_path = os.path.join(ckpt_path, "checkpoints", "last.ckpt")
+    model = instantiate_from_config(model_config)
     
     data = instantiate_from_config(config.data)
     data.prepare_data()
     data.setup()
     
     eval_config = config.eval
-    keys = np.arange(0, eval_config.n_classes)
+    n_classes = eval_config.n_classes
+    keys = np.arange(0, n_classes)
     values = eval_config.colorize
     colors_dict = dict(zip(keys, values))
     palette = palette_from_dict(colors_dict)
@@ -118,22 +126,42 @@ if __name__ == "__main__":
 
     # Initialise confusion matrix
     confusion = BinaryConfusionMatrix(eval_config.n_classes)
+    
+    os.makedirs(os.path.join(base_inference_path, opt.savename, 'hallucinated'), exist_ok=True)
+    os.makedirs(os.path.join(base_inference_path, opt.savename, 'not_hallucinated'), exist_ok=True)
 
     for i,batch in enumerate(tqdm(data._val_dataloader())):
         
         img = batch['image'].permute(0,3,1,2).float()
-        bev = batch['bev'].permute(0,3,1,2).float()
-        mask = batch['mask'].bool()
+        if dataset == 'kitti':
+            bev = batch['bev'][:, :, :, 1:].permute(0,3,1,2).long()
+            mask = batch['mask'].bool()
+        else:
+            bev = batch['bev'].unsqueeze(1).long()
+            mask = (bev != 255).bool()
+            bev[bev == 255] = n_classes
+            bev = F.one_hot(bev, num_classes=n_classes + 1)
+            bev = bev.squeeze(1).permute(0, 3, 1, 2)
+            bev = bev[:, :-1, :, :]
         cam = batch['cam'].float()
+
+        if with_depth:
+            depth = batch['depth'].unsqueeze(1).float()
 
         if torch.cuda.is_available():
             img = img.cuda()
             bev = bev.cuda()
             mask = mask.cuda()
             cam = cam.cuda()
+            
+            if with_depth:
+                depth = depth.cuda()
         
         with torch.no_grad():
-            logits = model(img, cam)
+            if with_depth:
+                logits, _ = model(img, cam, depth)
+            else:
+                logits, _ = model(img, cam)
         
         sample = batch["sample"] if "sample" in batch else None
 
@@ -147,11 +175,19 @@ if __name__ == "__main__":
         #img = np.squeeze(np.argmax(logits.cpu().numpy().transpose((0, 2, 3, 1)), axis = 3)).astype(np.uint8)
             img = amax.squeeze().cpu().numpy().astype(np.uint8)
             seq_name, img_name = sample[0][0], sample[1][0]
-            os.makedirs(os.path.join(base_inference_path, opt.savename, seq_name), exist_ok=True)
-            pil_image = Image.fromarray(img, 'P')
-            pil_image.putpalette(palette)
-            save_path = os.path.join(base_inference_path, opt.savename, seq_name, img_name)
-            pil_image.save(save_path)
+            os.makedirs(os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name), exist_ok=True)
+            hal_image = Image.fromarray(img, 'P')
+            hal_image.putpalette(palette)
+            save_path = os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name, img_name)
+            hal_image.save(save_path)
+            os.makedirs(os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name), exist_ok=True)
+            mask = mask.squeeze().cpu().numpy().astype(bool)
+            img[~mask] = 255
+            non_hal_image = Image.fromarray(img, 'P')
+            non_hal_image.putpalette(palette)
+            save_path = os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name, img_name)
+            non_hal_image.save(save_path)
+
 
     os.makedirs(os.path.join(base_result_path), exist_ok=True)
     result_save_path = os.path.join(base_result_path, opt.savename + '.txt')

@@ -43,12 +43,20 @@ class KITTI360BEVBase(Dataset):
                 else preprocess_param['crop_region']
         self.flip_prob = 0.5 if preprocess_param is None or 'flip_prob' not in preprocess_param \
                 else preprocess_param['flip_prob']
-        self.bottom_crop_augmentation_prob = 0.5 if preprocess_param is None or 'bottom_crop_augmentation_prob' not in preprocess_param \
-                else preprocess_param['bottom_crop_augmentation_prob']
-        self.side_crop_augmentation_prob = 0.5 if preprocess_param is None or 'side_crop_augmentation_prob' not in preprocess_param \
-                else preprocess_param['side_crop_augmentation_prob']
-        self.rotate_augmentation_prob = 0.5 if preprocess_param is None or 'rotate_augmentation_prob' not in preprocess_param \
-                else preprocess_param['rotate_augmentation_prob']
+        self.additional_augmentation_prob = 0. if preprocess_param is None or 'additional_augmentation_prob' not in preprocess_param \
+                else preprocess_param['additional_augmentation_prob']
+        self.do_rotate_augmentation = False if preprocess_param is None or 'do_rotate_augmentation' not in preprocess_param \
+                else preprocess_param['do_rotate_augmentation']
+        self.do_side_crop_augmentation = False if preprocess_param is None or 'do_side_crop_augmentation' not in preprocess_param \
+                else preprocess_param['do_side_crop_augmentation']
+        self.do_bottom_crop_augmentation = False if preprocess_param is None or 'do_bottom_crop_augmentation' not in preprocess_param \
+                else preprocess_param['do_bottom_crop_augmentation']
+        #self.bottom_crop_augmentation_prob = 0.5 if preprocess_param is None or 'bottom_crop_augmentation_prob' not in preprocess_param \
+        #        else preprocess_param['bottom_crop_augmentation_prob']
+        #self.side_crop_augmentation_prob = 0.5 if preprocess_param is None or 'side_crop_augmentation_prob' not in preprocess_param \
+        #        else preprocess_param['side_crop_augmentation_prob']
+        #self.rotate_augmentation_prob = 0.5 if preprocess_param is None or 'rotate_augmentation_prob' not in preprocess_param \
+        #        else preprocess_param['rotate_augmentation_prob']
         self.rgb_size = (384, 1408) if preprocess_param is None or 'rgb_size' not in preprocess_param \
                 else preprocess_param['rgb_size']
         self.bev_size = (200, 200) if preprocess_param is None or 'bev_size' not in preprocess_param \
@@ -94,6 +102,7 @@ class KITTI360BEVBase(Dataset):
         self.rgb_rescaler = albumentations.Resize(*self.rgb_size)
         self.bev_preprocessor = albumentations.Compose([self.cropper, self.bev_rescaler])
         if self.with_depth:
+            self.depth_rescaler = albumentations.Resize(*self.rgb_size, interpolation = 0)
             self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image', 'depth': 'image'},
                     keypoint_params=albumentations.KeypointParams(format='xy'))
         else:
@@ -153,13 +162,51 @@ class KITTI360BEVBase(Dataset):
             depth_img = None
 
         cam = np.array(img_desc['cam_intrinsic']).astype(np.float)
+        
+        do_additional_augmentation = np.random.rand() < self.additional_augmentation_prob
+        if do_additional_augmentation:
+            if self.do_rotate_augmentation and not (self.do_side_crop_augmentation or self.do_bottom_crop_augmentation):
+                do_rotate = True
+                do_crop = False
+            elif (self.do_side_crop_augmentation or self.do_bottom_crop_augmentation) and not self.do_rotate_augmentation:
+                do_crop = True
+                do_rotate = False
+            else:
+                do_rotate = np.random.rand() < 0.5
+                do_crop = not do_rotate
+            
+            if do_crop:
+                if self.do_side_crop_augmentation and not self.do_bottom_crop_augmentation:
+                    do_side_crop = True
+                    do_bottom_crop = False
+                elif not self.do_side_crop_augmentation and self.do_bottom_crop_augmentation:
+                    do_side_crop = False
+                    do_bottom_crop = True
+                else:
+                    rnd_val = np.random.rand()
+                    if rnd_val < 0.33:
+                        do_side_crop = True
+                        do_bottom_crop = True
+                    elif 0.33 <= rnd_val < 0.66:
+                        do_bottom_crop = True
+                        do_side_crop = False
+                    else:
+                        do_bottom_crop = False
+                        do_side_crop = True
+            else:
+                do_side_crop = False
+                do_bottom_crop = False
+        else:
+            do_rotate = False
+            do_side_crop = False
+            do_bottom_crop = False
 
-        do_rotate = np.random.rand() < self.rotate_augmentation_prob
+        #do_rotate = np.random.rand() < self.rotate_augmentation_prob
         if do_rotate:
             rgb_img, bev_img, depth_img, weight_mask, cam = self.rotate_augmentation.do_rotate(rgb_img, bev_img, depth_img, weight_mask, cam)
         
-        do_side_crop = np.random.rand() < self.side_crop_augmentation_prob
-        do_bottom_crop = np.random. rand() < self.bottom_crop_augmentation_prob
+        #do_side_crop = np.random.rand() < self.side_crop_augmentation_prob
+        #do_bottom_crop = np.random. rand() < self.bottom_crop_augmentation_prob
         if do_side_crop or do_bottom_crop:
             rgb_img, bev_img, depth_img, weight_mask, cam = self.crop_augmentation.do_crop(do_bottom_crop, do_side_crop,
                     rgb_img, bev_img, depth_img, weight_mask, cam, img_desc['id'])
@@ -174,12 +221,12 @@ class KITTI360BEVBase(Dataset):
 
         if self.with_depth:
             depth_img = depth_img / self.max_depth
-            depth_img = self.rgb_rescaler(image=depth_img)["image"]
+            depth_img = self.depth_rescaler(image=depth_img)["image"]
             preprocessed = self.preprocessor(image = rgb_img, bev = bev_img, mask =mask, depth = depth_img, keypoints=principal_point)
         else:
             preprocessed = self.preprocessor(image = rgb_img, bev = bev_img, mask =mask, keypoints=principal_point)
         cx_flipped, cy_flipped = preprocessed['keypoints'][0]
-        cam [0,2] = cx_flipped
+        cam[0,2] = cx_flipped
         cam[1,2] = cy_flipped
 
         data = dict()
@@ -205,7 +252,7 @@ class KITTI360BEVBase(Dataset):
         return example
 
 class KITTI360BEVTrain(KITTI360BEVBase):
-    def __init__(self, rgb_root, bev_root, depth_root = None, with_depth = False, max_depth = 80., n_labels = 11, preprocess_param = None, mapping_param = None):
+    def __init__(self, rgb_root, bev_root, depth_root = None, with_depth = False, max_depth = 80., n_labels = 10, preprocess_param = None, mapping_param = None):
         super().__init__(rgb_root=rgb_root, bev_root = bev_root, depth_root = depth_root, with_depth = with_depth, max_depth = max_depth,
                 n_labels = n_labels, split = 'train', preprocess_param=preprocess_param, mapping_param=mapping_param)
 
@@ -213,7 +260,7 @@ class KITTI360BEVTrain(KITTI360BEVBase):
         return "train"
 
 class KITTI360BEVValidation(KITTI360BEVBase):
-    def __init__(self, rgb_root, bev_root, depth_root = None, with_depth = False, max_depth = 80.,n_labels = 11, preprocess_param = None, mapping_param = None):
+    def __init__(self, rgb_root, bev_root, depth_root = None, with_depth = False, max_depth = 80.,n_labels = 10, preprocess_param = None, mapping_param = None):
         super().__init__(rgb_root=rgb_root, bev_root = bev_root, depth_root = depth_root, with_depth = with_depth, max_depth = max_depth,
                 n_labels = n_labels, split = 'val', preprocess_param=preprocess_param, mapping_param=mapping_param)
 

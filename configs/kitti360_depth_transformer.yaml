@@ -68,12 +68,13 @@ model:
         foreground_classes: [0, 1, 6, 7, 8, 9]
         out_shape: [676, 676]
         resolution: 0.074
+        priors: kitti360
 
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 2
-    num_workers: 8
+    batch_size: 4
+    num_workers: 4
     train:
       target: bev.data.kitti360_bev.KITTI360BEVTrain
       params:

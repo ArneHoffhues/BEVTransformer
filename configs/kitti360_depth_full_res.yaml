@@ -35,9 +35,10 @@ model:
       params:
         in_channels: 512
         num_classes: 10
+        final_res: [676, 676]
         predict_vis: True
-        layers: [6, 1, 1]
-        strides: [1, 2, 2]
+        layers: [6, 2, 2, 2]
+        strides: [1, 2, 2, 2]
     loss_config:
       target: bev.model.loss.CombinedLoss
       params:
@@ -46,6 +47,7 @@ model:
           rotation: [-85, 0, 180]
         background_classes: [2, 3, 4, 5]
         foreground_classes: [0, 1, 6, 7, 8, 9]      
+        out_shape: [676, 676]
 
 data:
   target: bev.data.data_module.DataModuleFromConfig
@@ -61,8 +63,9 @@ data:
         depth_root: /home/hoffhues/PanopticBEV_images/KITTI360/depth/train
         with_depth: True
         preprocess_param:
-          bottom_crop_augmentation_prob: 1.
-          flip_prob: 0.
+          rgb_size: [384, 1408]
+          bev_size: [676, 676]
+          bottom_crop_augmentation_prob: 0.
           side_crop_augmentation_prob: 0.
           rotate_augmentation_prob: 0.
           brightness_factor: 0.
@@ -76,9 +79,11 @@ data:
         depth_root: /home/hoffhues/PanopticBEV_images/KITTI360/depth/val
         with_depth: True
         preprocess_param:
+          rgb_size: [384, 1408]
+          bev_size: [676, 676]
           bottom_crop_augmentation_prob: 0.
-          flip_prob: 0.
           side_crop_augmentation_prob: 0.
           rotate_augmentation_prob: 0.
-          saturation_factor: 0
-          hue_factor: 0
+          flip_prob: 0.
+          brightness_factor: 0
+          contrast_factor: 0

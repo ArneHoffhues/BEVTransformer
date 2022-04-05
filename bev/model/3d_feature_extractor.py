@@ -5,20 +5,28 @@ import torch.nn.functional as F
 from bev.model.utils import construct_volume_lattice
 from bev.model.resnet import ResNetLayer
 from bev.model.unet.unet_model import UNet3D
+from bev.model.depth_encoding import DepthEncoder, SimpleDepthEncoder
 
 class RayProjectionLayer(nn.Module):
 
-    def __init__(self, scales = [4, 8, 16, 32, 64], in_ch= 256, out_ch = 128, bev_grid_size=(49, 50), 
-            grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=50):
+    def __init__(self, scales = [4, 8, 16, 32, 64], in_ch= 256, out_ch = 128, bev_grid_size=(50, 50), 
+            grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=20, with_depth=False, with_depth_encoding=False):
         super().__init__()
         self.scales = scales
+        self.with_depth = with_depth
+        self.with_depth_encoding= with_depth_encoding
 
         self.register_buffer('volume_grid', construct_volume_lattice(bev_grid_size, 
             grid_cell_width, vertical_sampling_range,n_samples))
-        self.conv = nn.Conv3d(in_ch, out_ch, kernel_size=1, stride=1)
+        if self.with_depth:
+            self.reduce_conv = nn.Conv3d(in_ch, in_ch-1, kernel_size = 1, stride = 1)
+        if self.with_depth_encoding:
+            self.depth_encoder = SimpleDepthEncoder(out_ch = out_ch, bev_grid_size=bev_grid_size, grid_cell_width=grid_cell_width, 
+                    vertical_sampling_range = vertical_sampling_range, n_samples = n_samples)
+        self.conv = nn.Conv3d(in_ch, out_ch, kernel_size = 1, stride = 1)
         self.norm = nn.GroupNorm(16, out_ch)
 
-    def forward(self, features, cam):
+    def forward(self, features, cam, depth=None):
         assert len(features) == len(self.scales)        
         
         cams = [torch.stack([cam[:, 0, :] / scale, cam[:, 1, :] /scale, cam[:,2, :]], dim=1) for scale in self.scales]
@@ -34,9 +42,22 @@ class RayProjectionLayer(nn.Module):
             points = norm_points.permute((0, 3, 1, 2, 4)).contiguous().view(B, D * X, Y, V)
             sampled_values = F.grid_sample(f, points, padding_mode='zeros', align_corners=True) 
             sampled_values = sampled_values.view(B, C, D, X, Y).contiguous()
-            projections.append(sampled_values)
+            projections.append(sampled_values)  
 
         f_3d = torch.stack(projections, dim=0).mean(dim=0)
+
+        if self.with_depth:
+            assert depth is not None
+            sampled_depth = F.grid_sample(depth, points, padding_mode='zeros', align_corners=True)
+            sampled_depth = sampled_depth.view(B, 1, D, X, Y).contiguous()
+            f_3d = self.reduce_conv(f_3d)
+            f_3d = torch.cat([f_3d, sampled_depth], dim=1)
+
+        if self.with_depth_encoding:
+            assert depth is not None
+            encoded_depth = self.depth_encoder(depth, cam)
+            f_3d = f_3d + encoded_depth
+
         f_3d = F.relu(self.norm(self.conv(f_3d)))
         return f_3d
 
@@ -63,25 +84,40 @@ class ContextNetwork(nn.Module):
 class Net3D(nn.Module):
 
     def __init__(self, scales = [4, 8, 16, 32, 64], in_ch= 256, out_ch = 512, n_classes = 11, 
-            bev_grid_size=(49, 50), grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=50, with_context=False):
+            bev_grid_size=(49, 50), grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=50, initialization_level = -0.5,
+            with_context=False, with_depth=False, with_depth_encoding=False):
         super().__init__()        
         self.with_context = with_context
+        self.initialization_level = initialization_level
+        self.vertical_sampling_range = vertical_sampling_range
+        self.n_samples = n_samples
 
         if self.with_context:
             int_ch = in_ch // 2
             self.ray_projection_layer = RayProjectionLayer(scales, in_ch, int_ch, bev_grid_size,
-                grid_cell_width, vertical_sampling_range, n_samples)
+                grid_cell_width, vertical_sampling_range, n_samples, with_depth=with_depth, with_depth_encoding=with_depth_encoding)
             self.context_layer = ContextNetwork(n_classes, int_ch, out_ch)
         else:
             self.ray_projection_layer = RayProjectionLayer(scales, in_ch, out_ch, bev_grid_size,
-                grid_cell_width, vertical_sampling_range, n_samples)
+                grid_cell_width, vertical_sampling_range, n_samples, with_depth=with_depth, with_depth_encoding=with_depth_encoding)
 
-
-    def forward(self, f, cam):
-        x = self.ray_projection_layer(f, cam)
+    def forward(self, f, cam, depth=None):
+        x = self.ray_projection_layer(f, cam, depth)
         if self.with_context:
             x = self.context_layer(x)
-        return x
+        
+        B, C, D, X, Y = x.shape
+        #init_level = torch.tensor([self.config.initialization_level], dtype=torch.float32)
+        init_level = self.initialization_level
+        #vert_samples = torch.linspace(self.config.vertical_sampling_range[0], self.config.vertical_sampling_range[1], self.config.n_samples_vertical)
+        vert_samples = torch.linspace(self.vertical_sampling_range[0], self.vertical_sampling_range[1], self.n_samples, device=x.device)
+        assert init_level >= vert_samples[0] and init_level < vert_samples[-1]
+
+        init_index = torch.searchsorted(vert_samples, init_level)
+
+        init= x[:, :, :, :, init_index].clone().detach()
+        
+        return x, init
 
 def _test():
     f = [torch.rand((1, 256, 256 // scale, 1024 // scale)) for scale in [4, 8, 16, 32, 64]]
