@@ -6,8 +6,8 @@ data:
       target: bev.data.kitti_bev.KITTIBEVValidation
       params:
         rgb_root: /globalwork/data/KITTI_odometry_color/dataset/sequences/
-        bev_root: /home/hoffhues/BEV_data/sequences
-        depth_root: /home/hoffhues/KITTI_images/depth/
+        bev_root: /globalwork/hoffhues/BEV_data/sequences
+        depth_root: /globalwork/hoffhues/KITTI_images/depth/
         n_labels: 11
         split: ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10']
         preprocess_param:
@@ -45,5 +45,5 @@ eval:
                [100, 150, 245],
                [80, 30, 180],
                [0, 0, 0]]
-  inference_save_directory: /home/hoffhues/BEV_data/inference/BEVTransformer
-  result_save_directory: /home/hoffhues/BEV_data/results/BEVTransformer  
+  inference_save_directory: /globalwork/hoffhues/BEV_data/inference/BEVTransformer
+  result_save_directory: /globalwork/hoffhues/BEV_data/results/BEVTransformer  

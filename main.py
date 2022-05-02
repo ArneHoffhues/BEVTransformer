@@ -7,7 +7,7 @@ import torchvision
 from bev.utils import instantiate_from_config
 from bev.data.data_module import DataModuleFromConfig
 from bev.data.kitti_nuscenes import KITTIPlusNuscenesTrain
-from bev.data.nuscenes_bev import NuscenesSegmentationTrain
+from bev.data.nuscenes_pon import NuscenesSegmentationTrain
 from torch.utils.data import random_split, DataLoader, Dataset
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
@@ -95,6 +95,12 @@ def get_parser(**parser_kwargs):
         type=str,
         default="",
         help="post-postfix for default name",
+    )
+    parser.add_argument(
+        "--logdir",
+        type=str,
+        default="/globalwork/hoffhues/BEVTransformer/logs",
+        help="directory for logs",
     )
 
     return parser
@@ -345,7 +351,7 @@ if __name__ == "__main__":
         else:
             name = ""
         nowname = now+name+opt.postfix
-        logdir = os.path.join("logs", nowname)
+        logdir = os.path.join(opt.logdir, nowname)
 
     ckptdir = os.path.join(logdir, "checkpoints")
     cfgdir = os.path.join(logdir, "configs")

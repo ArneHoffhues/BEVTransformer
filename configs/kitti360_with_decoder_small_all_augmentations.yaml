@@ -77,19 +77,19 @@ model:
         foreground_classes: [0, 1, 6, 7, 8, 9]
         out_shape: [200, 200]
         resolution: 0.25
-
+        priors: kitti360
 
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 10
+    batch_size: 7
     num_workers: 8
     train:
       target: bev.data.kitti360_bev.KITTI360BEVTrain
       params:
         n_labels: 10
         rgb_root: /globalwork/data/KITTI-360
-        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
         preprocess_param:
           rgb_size: [384, 1408]
           bev_size: [200, 200]
@@ -104,7 +104,7 @@ data:
       params:
         n_labels: 10
         rgb_root: /globalwork/data/KITTI-360
-        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
         preprocess_param:
           rgb_size: [384, 1408]
           bev_size: [200, 200]

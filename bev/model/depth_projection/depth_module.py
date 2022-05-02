@@ -78,7 +78,7 @@ class GridAssembler(nn.Module):
                 device = density_grid.device, requires_grad = False)
         max_values = max_values[:, None].repeat(1, slice_size).reshape(1, 1, -1, 1).contiguous()
         density_grid = torch.min(density_grid, max_values)
-        density_grid /= max_values + GridAssembler._EPSILON
+        density_grid /= (max_values + GridAssembler._EPSILON)
         return density_grid
 
 

@@ -1,4 +1,4 @@
-from bev.data.nuscenes_bev import NuscenesSegmentationBase
+from bev.data.nuscenes_pon import NuscenesSegmentationBase
 from bev.data.kitti_bev import KITTIBEVBase
 import torch
 from torch.utils.data import Dataset

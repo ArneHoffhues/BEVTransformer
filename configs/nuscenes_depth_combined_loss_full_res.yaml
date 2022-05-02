@@ -1,9 +1,9 @@
 model:
   base_learning_rate: 4.5e-06
-  target: bev.model.model.BEVTransformer
+  target: bev.model.model.DepthAndSegUpsampler
   params:
     n_labels: 9
-    n_embed: 256
+    n_embed: 512
     class_names: ['road', 'sidewalk', 'manmade', 'vegetation', 'terrain', 'person',
                   'car', 'truck', 'rider']
     colorize: [[255, 0, 255],
@@ -17,55 +17,26 @@ model:
                [100, 230, 245],
                [0, 0, 0]]
     ignore_index: 255
-    transformer_config:
-      target: bev.model.transformer.SamplingTransformer
+    sfsegnet_config:
+      target: bev.model.sfsegnet.sfnet_resnet.DeepR18_SF_deeply_dsn
       params:
-        bev_grid_size: [50, 50]
-        grid_cell_width: 1
-        vertical_sampling_range: [-3, 3]
-        n_samples_vertical: 20
-        n_samples_ray: 50
-        neighbourhood_size: 7
-        initialization_level: -0.5
-        n_embed: 256
-        n_head: 8
-        num_layers: 6
-        dim_feedforward: 1024
-        normalize_before: False
-        activation: 'relu'
-    pos_encoding_config:
-      target: bev.model.pos_encoding.PositionEmbeddingSine
+        num_classes: 19
+        snapshot: ./pretrained/SFSegNet/sfnet_r18_map.pth
+    depth_module_config:
+      target: bev.model.depth_projection.depth_module.GridAssembler
       params:
-        num_pos_feats: 128
-    height_pos_encoding_config:
-      target: bev.model.pos_encoding.PositionEmbeddingSineHeight
-      params:
-        num_pos_feats: 256
-    backbone_config:
-      target: bev.model.backbone.swin.SwinFPN
-      params:      
-        variant: 'tiny'
-        pretrained_path: /home/hoffhues/master_repositories/BEVTransformer/pretrained/mask_rcnn_swin_tiny_patch4_window7.pth
-    net3d_config:
-      target: bev.model.3d_feature_extractor.Net3D
-      params:
-        scales: [4, 8, 16, 32, 64]
-        in_ch: 256
-        out_ch: 256
-        n_classes: 10
-        bev_grid_size: [50, 50]
-        grid_cell_width: 1
-        vertical_sampling_range: [-3, 3]
-        n_samples: 20
-        initialization_level: -0.5
+        grid_dim: [50, 50]
+        z_range: [51, 1]
+        x_range: [-25, 25]
+        num_pix: 344064
     decoder_config:
       target: bev.model.decoder.Decoder
       params:
-        in_channels: 256
+        in_channels: 512
         num_classes: 9
         final_res: [650, 650]
         predict_vis: True
-        layers: [6, 4, 4, 4]
+        layers: [6, 2, 2, 2]
         strides: [1, 2, 2, 2]
     loss_config:
       target: bev.model.loss.CombinedLoss
@@ -82,7 +53,7 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 5
+    batch_size: 8
     num_workers: 8
     train:
       target: bev.data.nuscenes_bev.NuScenesBEVTrain
@@ -90,6 +61,8 @@ data:
         n_labels: 9
         rgb_root: /globalwork/data/nuScenes-v1.0
         bev_root: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
+        depth_root: /globalwork/hoffhues/PanopticBEV_images/nuScenes/depth/train
+        with_depth: True
         preprocess_param:
           rgb_size: [448, 768]
           bev_size: [650, 650]
@@ -101,6 +74,8 @@ data:
         n_labels: 9
         rgb_root: /globalwork/data/nuScenes-v1.0
         bev_root: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
+        depth_root: /globalwork/hoffhues/PanopticBEV_images/nuScenes/depth/val
+        with_depth: True
         preprocess_param:
           rgb_size: [448, 768]
           bev_size: [650, 650]

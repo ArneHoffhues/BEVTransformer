@@ -104,8 +104,15 @@ if __name__ == "__main__":
     model_config_path = os.path.join(model_config_path, project_file)
     model_config = OmegaConf.load(model_config_path).model
     model_config.params.ckpt_path = os.path.join(ckpt_path, "checkpoints", "last.ckpt")
+    if os.path.getsize(model_config.params.ckpt_path) == 0:
+        ckpts = os.listdir(os.path.join(ckpt_path, "checkpoints"))
+        epoch_ckpt = [ckpt for ckpt in ckpts if ckpt.startswith('epoch=')][0]
+        ckpt = os.path.join(ckpt_path, "checkpoints", epoch_ckpt)
+        model_config.params.ckpt_path = ckpt
     model = instantiate_from_config(model_config)
     
+    if with_depth:
+        config.data.params.validation.params.with_depth = True
     data = instantiate_from_config(config.data)
     data.prepare_data()
     data.setup()
@@ -163,7 +170,7 @@ if __name__ == "__main__":
             else:
                 logits, _ = model(img, cam)
         
-        sample = batch["sample"] if "sample" in batch else None
+        #sample = batch["sample"] if "sample" in batch else None
 
         amax = torch.argmax(logits, dim =1, keepdim= True)
         one_hot = F.one_hot(amax, num_classes=eval_config.n_classes)
@@ -171,22 +178,28 @@ if __name__ == "__main__":
 
         confusion.update(one_hot.bool(), bev.bool(), mask=mask)
         
-        if sample is not None:
+        if dataset == 'kitti':
+            seq_name, img_name  = data.datasets['validation'].samples[i]
+        elif dataset == 'kitti360':
+            seq_name = data.datasets['validation'].split
+            img_name = data.datasets['validation'].images[i]['id'] + '.png'
+        else:
+            raise ValueError(f'unknown dataset name: {dataset}')
+
         #img = np.squeeze(np.argmax(logits.cpu().numpy().transpose((0, 2, 3, 1)), axis = 3)).astype(np.uint8)
-            img = amax.squeeze().cpu().numpy().astype(np.uint8)
-            seq_name, img_name = sample[0][0], sample[1][0]
-            os.makedirs(os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name), exist_ok=True)
-            hal_image = Image.fromarray(img, 'P')
-            hal_image.putpalette(palette)
-            save_path = os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name, img_name)
-            hal_image.save(save_path)
-            os.makedirs(os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name), exist_ok=True)
-            mask = mask.squeeze().cpu().numpy().astype(bool)
-            img[~mask] = 255
-            non_hal_image = Image.fromarray(img, 'P')
-            non_hal_image.putpalette(palette)
-            save_path = os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name, img_name)
-            non_hal_image.save(save_path)
+        img = amax.squeeze().cpu().numpy().astype(np.uint8)
+        os.makedirs(os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name), exist_ok=True)
+        hal_image = Image.fromarray(img, 'P')
+        hal_image.putpalette(palette)
+        save_path = os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name, img_name)
+        hal_image.save(save_path)
+        os.makedirs(os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name), exist_ok=True)
+        mask = mask.squeeze().cpu().numpy().astype(bool)
+        img[~mask] = 255
+        non_hal_image = Image.fromarray(img, 'P')
+        non_hal_image.putpalette(palette)
+        save_path = os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name, img_name)
+        non_hal_image.save(save_path)
 
 
     os.makedirs(os.path.join(base_result_path), exist_ok=True)

@@ -23,10 +23,10 @@ class BCELoss(nn.Module):
     def forward(self, prediction, target, mask, split):
         mask = mask.unsqueeze(1).float()
         if self.class_weights is not None:
-            weights = (self.class_weights.to(prediction)[None, :, None, None] - 1) * target + 1.
+            weights = (self.class_weights[None, :, None, None] - 1) * target + 1.
             mask = weights * mask
         loss = F.binary_cross_entropy_with_logits(prediction,target, weight=mask)
-        return loss, {"{}/loss".format(split): loss_combined.clone().detach().mean()}
+        return loss, {"{}/loss".format(split): loss.clone().detach().mean()}
 
 class DummyLoss(nn.Module):
     def __init__(self):
@@ -80,9 +80,9 @@ class CELossWithDistance(nn.Module):
                 self.register_buffer('class_weights', torch.sqrt(1 / torch.Tensor(kitti_priors)))
             elif priors == 'nuscenes':
                 nuscenes_bev_priors = list(NUSCENES_BEV_PRIORS.values())
-                del nuscenes_priors[-1]
-                del nuscenes_priors[6]
-                self.register_buffer('class_weights', torch.sqrt(1 / torch.Tensor(nuscenes_priors)))
+                del nuscenes_bev_priors[-1]
+                del nuscenes_bev_priors[6]
+                self.register_buffer('class_weights', torch.sqrt(1 / torch.Tensor(nuscenes_bev_priors)))
             else:
                 raise ValueError(f"Unknown prior option '{priors}'")
         
@@ -181,7 +181,7 @@ class CombinedLoss(nn.Module):
 
         a, b, c = self.loss_weights
         loss_combined = a * celoss + b * backgroundloss + c * vis_loss
-        loss_combined = a * celoss + c * vis_loss
+        #loss_combined = a * celoss + c * vis_loss
 
         return loss_combined, {"{}/total_loss".format(split): loss_combined.clone().detach().mean(),
                                "{}/seg_loss".format(split): celoss.detach().mean(),

@@ -26,7 +26,7 @@ class SamplingTransformer(nn.Module):
     def __init__(self, bev_grid_size = (49, 50), grid_cell_width = 1, vertical_sampling_range = [-3,3], n_samples_vertical = 50, 
             n_samples_ray = 50, neighbourhood_size = 17, initialization_level = -0.5, 
             n_embed = 512, n_head = 8, num_layers = 6, dim_feedforward=2048, normalize_before = False, activation='relu',
-            embed_pdrop=0.1, resid_pdrop=0.1, attn_pdrop=0.1):
+            embed_pdrop=0.1, resid_pdrop=0.1, attn_pdrop=0.1, with_ray_attention=True, with_neighbourhood_attention=True, with_cross_attention=True):
         super().__init__()
         self.config = TransformerConfig(n_embed=n_embed, n_head=n_head, num_layers=num_layers, bev_grid_size=bev_grid_size,
                             grid_cell_width=grid_cell_width, vertical_sampling_range=vertical_sampling_range, n_samples_vertical=n_samples_vertical,
@@ -34,28 +34,27 @@ class SamplingTransformer(nn.Module):
                             dim_feedforward=dim_feedforward, normalize_before=normalize_before, activation=activation,
                             embed_pdrop=embed_pdrop, resid_pdrop=resid_pdrop, attn_pdrop=attn_pdrop)
 
-        self.layer = TransformerLayer(self.config)
+        self.layer = TransformerLayer(self.config, with_ray_attention, with_neighbourhood_attention, with_cross_attention)
         self.layers = _get_clones(self.layer, num_layers)
         self.norm = nn.LayerNorm(n_embed) if normalize_before else None 
 
-        #TODO add positional encoding
-
     def forward(self, f, init, init_pos, height_pos):
         
-        B, C, D, X, Y = f.shape
-        assert (D, X) == self.config.bev_grid_size
-        f = f.permute(0, 2, 3, 4, 1).contiguous().view(B, D * X, Y, C)
-        if height_pos is not None:
-            height_pos = height_pos.permute(0, 2, 3, 4, 1).view(B, D * X, Y, C)
+        if f is not None:
+            B, C, D, X, Y = f.shape
+            assert (D, X) == self.config.bev_grid_size
+            f = f.permute(0, 2, 3, 4, 1).contiguous().view(B, D * X, Y, C)
+            if height_pos is not None:
+                height_pos = height_pos.permute(0, 2, 3, 4, 1).view(B, D * X, Y, C)
 
         B, C, D, X = init.shape
         assert (D, X) == self.config.bev_grid_size
-        init = init.permute(0, 2, 3, 1).contiguous().view(B, D * X, C)
+        x = init.permute(0, 2, 3, 1).contiguous().view(B, D * X, C)
         if init_pos is not None:
             init_pos = init_pos.permute(0, 2, 3, 1).contiguous().view(B, D * X, C)
 
         for layer in self.layers:
-            x = layer(init, f, init_pos, height_pos)
+            x = layer(x, f, init_pos, height_pos)
 
         if self.norm is not None:
             x = self.norm(x)
@@ -66,20 +65,27 @@ class SamplingTransformer(nn.Module):
 
 class TransformerLayer(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config, with_ray_attention, with_neighbourhood_attention, with_cross_attention):
         super().__init__()
         
         #self.register_buffer('neighbourhood_mask', construct_neighbourhood_attention_mask(config.bev_grid_size,
         #    config.neighbourhood_size))
+        self.with_ray_attention = with_ray_attention
+        self.with_neighbourhood_attention = with_neighbourhood_attention
+        self.with_cross_attention = with_cross_attention
+
         neighbourhood_attention_grid = construct_neighbourhood_attention_grid(config.bev_grid_size, config.neighbourhood_size).\
                 view((config.bev_grid_size[0]*config.bev_grid_size[1], config.neighbourhood_size * config.neighbourhood_size, 2))
         ray_grid =construct_ray_attention_grid_corners_aligned(config.bev_grid_size, 
                 config.n_samples_ray).view((config.bev_grid_size[0]*config.bev_grid_size[1], config.n_samples_ray, 2))
-
-        self.ray_attn = SampleAttentionModule(config, sample_grid = ray_grid, samp_input_dim = config.bev_grid_size)
-        self.cross_attn = SampleAttentionModule(config)
+        
+        if self.with_ray_attention:
+            self.ray_attn = SampleAttentionModule(config, sample_grid = ray_grid, samp_input_dim = config.bev_grid_size)
+        if self.with_cross_attention:
+            self.cross_attn = SampleAttentionModule(config)
         #self.neighbourhood_attn = nn.MultiheadAttention(config.n_embed, config.n_head, dropout=config.attn_pdrop, batch_first=True)
-        self.neighbourhood_attn = SampleAttentionModule(config, sample_grid = neighbourhood_attention_grid, samp_input_dim = config.bev_grid_size)
+        if self.with_neighbourhood_attention:
+            self.neighbourhood_attn = SampleAttentionModule(config, sample_grid = neighbourhood_attention_grid, samp_input_dim = config.bev_grid_size)
         self.mlp = nn.Sequential(
                 nn.Linear(config.n_embed, config.dim_feedforward),
                 _get_activation_function(config.activation),
@@ -108,13 +114,16 @@ class TransformerLayer(nn.Module):
 
     def forward(self, x, f, x_pos, f_pos):
         x = self.norm1(x)
-        res = self.cross_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(f, f_pos), f)
-        x = self.norm2(x + self.dropout1(res))
-        res = self.ray_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(x, x_pos), x)
-        x = self.norm3(x + self.dropout2(res))
+        if self.with_cross_attention:
+            res = self.cross_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(f, f_pos), f)
+            x = self.norm2(x + self.dropout1(res))
+        if self.with_ray_attention:
+            res = self.ray_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(x, x_pos), x)
+            x = self.norm3(x + self.dropout2(res))
         #res = self.neighbourhood_attn(x, x, x, attn_mask = self.neighbourhood_mask)[0]
-        res = self.neighbourhood_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(x, x_pos), x)
-        x = self.norm4(x + self.dropout3(res))
+        if self.with_neighbourhood_attention:
+            res = self.neighbourhood_attn(self.with_pos_embed(x, x_pos), self.with_pos_embed(x, x_pos), x)
+            x = self.norm4(x + self.dropout3(res))
         x = self.norm5(x + self.mlp(x))
         return x
 

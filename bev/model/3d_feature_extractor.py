@@ -7,14 +7,21 @@ from bev.model.resnet import ResNetLayer
 from bev.model.unet.unet_model import UNet3D
 from bev.model.depth_encoding import DepthEncoder, SimpleDepthEncoder
 
-class RayProjectionLayer(nn.Module):
+#from utils import construct_volume_lattice
+#from resnet import ResNetLayer
+#from unet.unet_model import UNet3D
+#from depth_encoding import DepthEncoder, SimpleDepthEncoder
+
+
+class ProjectionLayer(nn.Module):
 
     def __init__(self, scales = [4, 8, 16, 32, 64], in_ch= 256, out_ch = 128, bev_grid_size=(50, 50), 
-            grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=20, with_depth=False, with_depth_encoding=False):
+            grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=20, with_depth=False, with_depth_encoding=False, ground_projected=False):
         super().__init__()
         self.scales = scales
         self.with_depth = with_depth
         self.with_depth_encoding= with_depth_encoding
+        self.ground_projected = ground_projected
 
         self.register_buffer('volume_grid', construct_volume_lattice(bev_grid_size, 
             grid_cell_width, vertical_sampling_range,n_samples))
@@ -59,11 +66,14 @@ class RayProjectionLayer(nn.Module):
             f_3d = f_3d + encoded_depth
 
         f_3d = F.relu(self.norm(self.conv(f_3d)))
+
+        if self.ground_projected:
+            f_3d = torch.mean(f_3d, dim=-1)
         return f_3d
 
 class ContextNetwork(nn.Module):
 
-    def __init__(self, n_classes, in_ch=128, out_ch=512):
+    def __init__(self, n_classes, in_ch=128, out_ch=256):
         super().__init__()
         self.unet = UNet3D(in_ch, in_ch, final_sigmoid = False, f_maps = 128, num_groups = 16,
                 num_levels=3, is_segmentation=False)
@@ -83,10 +93,14 @@ class ContextNetwork(nn.Module):
 
 class Net3D(nn.Module):
 
-    def __init__(self, scales = [4, 8, 16, 32, 64], in_ch= 256, out_ch = 512, n_classes = 11, 
-            bev_grid_size=(49, 50), grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=50, initialization_level = -0.5,
-            with_context=False, with_depth=False, with_depth_encoding=False):
-        super().__init__()        
+    def __init__(self, scales = [4, 8, 16, 32, 64], in_ch= 256, out_ch = 256, n_classes = 10, 
+            bev_grid_size=(50, 50), grid_cell_width=1, vertical_sampling_range=[-3,3], n_samples=20, initialization_level = -0.5,
+            with_context=False, with_depth=False, with_depth_encoding=False, ground_projected=False):
+        super().__init__()
+        if ground_projected and (with_context or with_depth or with_depth_encoding):
+            raise ValueError('ground_projected and with_context, with_depth and with_depth_encoding are mutually exclusive!')
+        
+        self.ground_projected = ground_projected
         self.with_context = with_context
         self.initialization_level = initialization_level
         self.vertical_sampling_range = vertical_sampling_range
@@ -94,38 +108,64 @@ class Net3D(nn.Module):
 
         if self.with_context:
             int_ch = in_ch // 2
-            self.ray_projection_layer = RayProjectionLayer(scales, in_ch, int_ch, bev_grid_size,
-                grid_cell_width, vertical_sampling_range, n_samples, with_depth=with_depth, with_depth_encoding=with_depth_encoding)
+            self.projection_layer = ProjectionLayer(scales, in_ch, int_ch, bev_grid_size,
+                grid_cell_width, vertical_sampling_range, n_samples, with_depth=with_depth, with_depth_encoding=with_depth_encoding, ground_projected=ground_projected)
             self.context_layer = ContextNetwork(n_classes, int_ch, out_ch)
         else:
-            self.ray_projection_layer = RayProjectionLayer(scales, in_ch, out_ch, bev_grid_size,
-                grid_cell_width, vertical_sampling_range, n_samples, with_depth=with_depth, with_depth_encoding=with_depth_encoding)
+            self.projection_layer = ProjectionLayer(scales, in_ch, out_ch, bev_grid_size,
+                grid_cell_width, vertical_sampling_range, n_samples, with_depth=with_depth, with_depth_encoding=with_depth_encoding, ground_projected=ground_projected)
 
     def forward(self, f, cam, depth=None):
-        x = self.ray_projection_layer(f, cam, depth)
+        x = self.projection_layer(f, cam, depth)
         if self.with_context:
             x = self.context_layer(x)
         
-        B, C, D, X, Y = x.shape
-        #init_level = torch.tensor([self.config.initialization_level], dtype=torch.float32)
-        init_level = self.initialization_level
-        #vert_samples = torch.linspace(self.config.vertical_sampling_range[0], self.config.vertical_sampling_range[1], self.config.n_samples_vertical)
-        vert_samples = torch.linspace(self.vertical_sampling_range[0], self.vertical_sampling_range[1], self.n_samples, device=x.device)
-        assert init_level >= vert_samples[0] and init_level < vert_samples[-1]
+        if not self.ground_projected:
+            B, C, D, X, Y = x.shape
+            #init_level = torch.tensor([self.config.initialization_level], dtype=torch.float32)
+            init_level = self.initialization_level
+            #vert_samples = torch.linspace(self.config.vertical_sampling_range[0], self.config.vertical_sampling_range[1], self.config.n_samples_vertical)
+            vert_samples = torch.linspace(self.vertical_sampling_range[0], self.vertical_sampling_range[1], self.n_samples, device=x.device)
+            assert init_level >= vert_samples[0] and init_level < vert_samples[-1]
 
-        init_index = torch.searchsorted(vert_samples, init_level)
+            init_index = torch.searchsorted(vert_samples, init_level)
 
-        init= x[:, :, :, :, init_index].clone().detach()
-        
+            init= x[:, :, :, :, init_index].clone().detach()
+        else:
+            init = x
+            x = None
+
         return x, init
+
+class TransformModule(nn.Module):
+    def __init__(self, dim=(6, 22), out=(50, 50)):
+        super(TransformModule, self).__init__()
+        self.dim = dim
+        self.out = out
+
+        self.fc_transform = nn.Sequential(
+                        nn.Linear(dim[0] * dim[1], dim[0] * dim[1]),
+                        nn.ReLU(),
+                        nn.Linear(dim[0] * dim[1], out[0] * out[1]),
+                        nn.ReLU()
+                    )
+
+    def forward(self, f, cam):
+        x = f[-1]
+        x = x.view(list(x.size()[:2]) + [self.dim[0] * self.dim[1],])
+        x = self.fc_transform(x)
+        init = x.view(list(x.size()[:2]) + list(self.out))
+        return None, init
 
 def _test():
     f = [torch.rand((1, 256, 256 // scale, 1024 // scale)) for scale in [4, 8, 16, 32, 64]]
     cam = torch.tensor([[700, 0, 512], [0, 700, 128], [0, 0,1]], dtype = torch.float32)
-    net = Net3D()
-    out, collapsed = net(f, cam)
-    print(out.shape)
-    print(collapsed.shape)
+    cam = cam[None, :, :]
+    #net = Net3D()
+    net = TransformModule()
+    x, init = net(f, cam)
+    print(x)
+    print(init.shape)
 
 if __name__ == '__main__':
     _test()

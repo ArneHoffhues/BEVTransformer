@@ -8,9 +8,10 @@ from bev.data.nuscenes_utils import NUSCENES_TRAIN_SCENES, NUSCENES_VAL_SCENES, 
 from nuscenes import NuScenes
 import os
 import random
+import cv2
 
 class NuscenesSegmentationBase(Dataset):
-    def __init__(self, label_path, depth_path, split, dataset_size = None, preprocess_param = None, n_labels = 14):
+    def __init__(self, label_path, split, depth_path = None, dataset_size= None, preprocess_param = None, n_labels = 14):
         super().__init__()
 
         self.n_labels = n_labels
@@ -27,7 +28,7 @@ class NuscenesSegmentationBase(Dataset):
         self.crop_region = [150, 0, 650, 500] if preprocess_param is None else preprocess_param['crop_region']
         self.flip_prob = 0.5 if preprocess_param is None else preprocess_param['flip_prob']
         self.rgb_size = (600, 800) if preprocess_param is None else preprocess_param['rgb_size']
-        self.bev_size = (50, 50) if preprocess_param is None else preprocess_param['bev_size']
+        self.bev_size = (200, 200) if preprocess_param is None else preprocess_param['bev_size']
 
         if self.crop_region is not None and len(self.crop_region) == 4:
             x_min, y_min, x_max, y_max = self.crop_region
@@ -42,9 +43,11 @@ class NuscenesSegmentationBase(Dataset):
             #self.rescaler = albumentations.SmallestMaxSize(max_size = self.size)
             self.bev_rescaler = albumentations.Resize(*self.bev_size, interpolation=0)
             self.rgb_rescaler = albumentations.Resize(*self.rgb_size)
-            self.vflip = albumentations.VerticalFlip(always_apply = True, p=1.0)
-            self.bev_preprocessor = albumentations.Compose([self.cropper, self.bev_rescaler, self.vflip], additional_targets={'mask': 'image'})
-            self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image', 'depth': 'image'})
+            self.bev_preprocessor = albumentations.Compose([self.cropper, self.bev_rescaler], additional_targets={'mask': 'image'})
+            if self.depth_path is not None: 
+                self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image', 'depth': 'image'})
+            else:
+                self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image'})
         else:
             self.preprocessor = lambda **kwargs: kwargs
     
@@ -100,18 +103,21 @@ class NuscenesSegmentationBase(Dataset):
         bev = np.moveaxis(bev, 0, -1)
 
         bev_preprocessed = self.bev_preprocessor(image = bev, mask = mask)
-        bev = bev_preprocessed["image"]
-        mask = bev_preprocessed["mask"]
+        bev = cv2.rotate(bev_preprocessed["image"], cv2.ROTATE_180)
+        mask = cv2.rotate(bev_preprocessed["mask"], cv2.ROTATE_180)
 
         rgb_img = np.asarray(Image.open(self.nuscenes.get_sample_data_path(token))).astype(np.uint8)
         rgb_img = self.rgb_rescaler(image=rgb_img)["image"]
         rgb_img = (rgb_img/127.5 - 1.0).astype(np.float32)
         
-        depth_img_name = token +'_depth.png'
-        depth_img = np.asarray(Image.open(os.path.join(self.depth_path, depth_img_name))).astype(np.uint16)
-        depth_img = depth_img / 256.
-        depth_img = self.rgb_rescaler(image=depth_img)["image"]
-        preprocessed = self.preprocessor(image = rgb_img, bev = bev, mask =mask, depth = depth_img)
+        if self.depth_path is not None:
+            depth_img_name = token +'_depth.png'
+            depth_img = np.asarray(Image.open(os.path.join(self.depth_path, depth_img_name))).astype(np.uint16)
+            depth_img = depth_img / 256.
+            depth_img = self.rgb_rescaler(image=depth_img)["image"]
+            preprocessed = self.preprocessor(image = rgb_img, bev = bev, mask =mask, depth = depth_img)
+        else:
+            preprocessed = self.preprocessor(image = rgb_img, bev = bev, mask =mask)
 
         # Load camera intrinsics matrix
         sample_data = self.nuscenes.get('sample_data', token)
@@ -127,7 +133,8 @@ class NuscenesSegmentationBase(Dataset):
         data["image"] =preprocessed["image"]
         data["bev"] = preprocessed["bev"]
         data["mask"] = preprocessed["mask"]
-        data["depth"] = preprocessed["depth"]
+        if self.depth_path is not None:
+            data["depth"] = preprocessed["depth"]
         data["cam"] = intrinsics.numpy()
 
         # one-hot encoding
@@ -147,13 +154,14 @@ class NuscenesSegmentationBase(Dataset):
         example["image"] = data["image"]
         example["mask"] = data["mask"]
         example["bev"] = data["bev"]
-        example["depth"] = data["depth"]
+        if self.depth_path is not None:
+            example["depth"] = data["depth"]
         example["cam"] = data["cam"]
         #example["sample"] = self.samples[i]
         return example
 
 class NuscenesSegmentationTrain(NuscenesSegmentationBase):
-    def __init__(self, label_path, depth_path, dataset_size = None, preprocess_param = None, n_labels = 14):
+    def __init__(self, label_path, depth_path=None, dataset_size = None, preprocess_param = None, n_labels = 14):
         super().__init__(label_path=label_path, depth_path = depth_path, dataset_size=dataset_size, preprocess_param=preprocess_param, 
                 n_labels=n_labels, split = 'train')
 
@@ -161,7 +169,7 @@ class NuscenesSegmentationTrain(NuscenesSegmentationBase):
         return "train"
 
 class NuscenesSegmentationValidation(NuscenesSegmentationBase):
-    def __init__(self, label_path, depth_path, dataset_size = None, preprocess_param = None, n_labels = 14):
+    def __init__(self, label_path, depth_path=None, dataset_size = None, preprocess_param = None, n_labels = 14):
         super().__init__(label_path=label_path, depth_path =depth_path, dataset_size=dataset_size, preprocess_param=preprocess_param, 
                 n_labels=n_labels, split = 'val')
 

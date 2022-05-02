@@ -114,7 +114,7 @@ class KITTIBEVBase(Dataset):
         principal_point = [(cam[0,2], cam[1, 2])]
 
         if self.with_depth:
-            depth_path = os.path.join(self.depth_root, sample[0], sample[1])
+            depth_path = os.path.join(self.depth_root, sample[0], sample[1].split('_')[-1])
             depth_img = np.array(Image.open(depth_path)).astype(np.uint16)
             depth_img = depth_img / KITTIBEVBase._DEPTH_SCALE_FACTOR
             depth_img = depth_img / self.max_depth

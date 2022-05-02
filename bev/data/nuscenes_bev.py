@@ -33,7 +33,7 @@ class NuScenesBEVBase(Dataset):
             self.max_depth = max_depth
         
         self.img_dir = os.path.join(bev_root, NuScenesBEVBase._IMG_DIR)
-        self.bev_msk_dir = os.path.join(bev_root, NuScenesBEVBase._BEV_MSK_DIR, KITTI360BEVBase._BEV_DIR)
+        self.bev_msk_dir = os.path.join(bev_root, NuScenesBEVBase._BEV_MSK_DIR, NuScenesBEVBase._BEV_DIR)
         self.weights_msk_dir = os.path.join(bev_root, NuScenesBEVBase._WEIGHTS_MSK_DIR)
         self.lst_dir = os.path.join(bev_root, NuScenesBEVBase._LST_DIR)
 

@@ -6,8 +6,8 @@ data:
       target: bev.data.kitti360_bev.KITTI360BEVValidation
       params:
         rgb_root: /globalwork/data/KITTI-360
-        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
-        depth_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        depth_root: /globalwork/hoffhues/PanopticBEV_images/KITTI360/depth/val
         n_labels: 10
         preprocess_param:
           rgb_size: [384, 1408]
@@ -34,5 +34,5 @@ eval:
                [100, 150, 245],
                [80, 30, 180],
                [0, 0, 0]]
-  inference_save_directory: /home/hoffhues/BEV_data/inference/BEVTransformer
-  result_save_directory: /home/hoffhues/BEV_data/results/BEVTransformer  
+  inference_save_directory: /globalwork/hoffhues/BEV_data/inference/BEVTransformer
+  result_save_directory: /globalwork/hoffhues/BEV_data/results/BEVTransformer  

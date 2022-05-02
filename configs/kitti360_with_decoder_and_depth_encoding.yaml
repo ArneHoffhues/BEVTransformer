@@ -84,15 +84,15 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 4
+    batch_size: 2
     num_workers: 4
     train:
       target: bev.data.kitti360_bev.KITTI360BEVTrain
       params:
         n_labels: 10
         rgb_root: /globalwork/data/KITTI-360
-        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
-        depth_root: /home/hoffhues/PanopticBEV_images/KITTI360/depth/train
+        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        depth_root: /globalwork/hoffhues/PanopticBEV_images/KITTI360/depth/train
         with_depth: True
         preprocess_param:
           rgb_size: [384, 1408]
@@ -107,8 +107,8 @@ data:
       params:
         n_labels: 10
         rgb_root: /globalwork/data/KITTI-360
-        bev_root: /home/hoffhues/PanopticBEV_data/kitti360_panopticbev
-        depth_root: /home/hoffhues/PanopticBEV_images/KITTI360/depth/val
+        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        depth_root: /globalwork/hoffhues/PanopticBEV_images/KITTI360/depth/val
         with_depth: True
         preprocess_param:
           rgb_size: [384, 1408]
