@@ -83,8 +83,8 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 10
-    num_workers: 8
+    batch_size: 2
+    num_workers: 4
     train:
       target: bev.data.nuscenes_bev.NuScenesBEVTrain
       params:
