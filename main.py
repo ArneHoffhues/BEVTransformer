@@ -96,12 +96,12 @@ def get_parser(**parser_kwargs):
         default="",
         help="post-postfix for default name",
     )
-    parser.add_argument(
-        "--logdir",
-        type=str,
-        default="/globalwork/hoffhues/BEVTransformer/logs",
-        help="directory for logs",
-    )
+    #parser.add_argument(
+    #    "--logdir",
+    #    type=str,
+    #    default="/globalwork/hoffhues/BEVTransformer/logs",
+    #    help="directory for logs",
+    #)
 
     return parser
 
@@ -111,6 +111,43 @@ def nondefault_trainer_args(opt):
     parser = Trainer.add_argparse_args(parser)
     args = parser.parse_args([])
     return sorted(k for k in vars(args) if getattr(opt, k) != getattr(args, k))
+
+def parse_meta_config(meta_config, exp_config):
+    if 'backbone_config' in exp_config.model.params:
+        backbone_config = exp_config.model.params.backbone_config
+        if 'snapshot' in backbone_config.params:
+            backbone_config.params.pretrained_path = os.path.join(meta_config.pretrained_path, backbone_config.params.snapshot)
+            del backbone_config.params['snapshot']
+    if 'sfsegnet_config' in exp_config.model.params:
+        sfsegnet_config = exp_config.model.params.sfsegnet_config
+        if 'snapshot' in sfsegnet_config.params:
+            sfsegnet_config.params.pretrained_path = os.path.join(meta_config.pretrained_path, sfsegnet_config.params.snapshot)
+            del sfsegnet_config.params['snapshot']
+    dataset = exp_config.data.params.dataset
+    if dataset in ['kitti360', 'nuscenes_bev']:
+        with_depth = exp_config.data.params.with_depth
+        for split in ['train', 'validation']:
+            if split in exp_config.data.params:
+                split_config = exp_config.data.params[split]
+                split_config.params.rgb_root = meta_config.datasets[dataset].gt
+                split_config.params.bev_root = meta_config.datasets[dataset].labels
+                if with_depth:
+                    split_config.params.with_depth = True
+                    if split == 'train':
+                        split_config.params.depth_root = os.path.join(meta_config.datasets[dataset].depth, 'train')
+                    else:
+                        split_config.params.depth_root = os.path.join(meta_config.datasets[dataset].depth, 'val')
+        del exp_config.data.params['with_depth']
+    elif dataset == 'nuscenes_pon':
+        exp_config.data.params.nuscenes_path = meta_config.datasets.nuscenes_pon.gt
+        exp_config.data.params.nuscenes_version = meta_config.datasets.nuscenes_pon.version
+        for split in ['train', 'validation']:
+            if split in exp_config.data.params:
+                split_config = exp_config.data.params[split]
+                split_config.params.label_path = meta_config.datasets.nuscenes_pon.labels
+    else:
+        raise ValueError(f'Invalid dataset: {dataset}')
+    del exp_config.data.params['dataset']
 
 
 class SetupCallback(Callback):
@@ -167,34 +204,44 @@ class ImageLogger(Callback):
         self.batch_freq = batch_frequency
         self.max_images = max_images
         self.logger_log_images = {
-            pl.loggers.WandbLogger: self._wandb,
-            pl.loggers.TestTubeLogger: self._testtube,
-
+            pl.loggers.TensorBoardLogger: self._tensorboard,
+            #pl.loggers.WandbLogger: self._wandb,
+            #pl.loggers.TestTubeLogger: self._testtube,
         }
         self.log_steps = [2 ** n for n in range(int(np.log2(self.batch_freq)) + 1)]
         if not increase_log_steps:
             self.log_steps = [self.batch_freq]
         self.clamp = clamp
-
+    
     @rank_zero_only
-    def _wandb(self, pl_module, images, batch_idx, split):
-        raise ValueError("No way wandb")
-        grids = dict()
+    def _tensorboard(self, pl_module, images, batch_idx, split):
         for k in images:
             grid = torchvision.utils.make_grid(images[k])
-            grids[f"{split}/{k}"] = wandb.Image(grid)
-        pl_module.logger.experiment.log(grids)
-
-    @rank_zero_only
-    def _testtube(self, pl_module, images, batch_idx, split):
-        for k in images:
-            grid = torchvision.utils.make_grid(images[k])
-            grid = (grid+1.0)/2.0 # -1,1 -> 0,1; c,h,w
-
+            grid = (grid+1.0)/2.0 
+            
             tag = f"{split}/{k}"
-            pl_module.logger.experiment.add_image(
-                tag, grid,
-                global_step=pl_module.global_step)
+            pl_module.logger.experiment.add_image(tag, grid,
+                    global_step=pl_module.global_step)
+
+    #@rank_zero_only
+    #def _wandb(self, pl_module, images, batch_idx, split):
+    #    raise ValueError("No way wandb")
+    #    grids = dict()
+    #    for k in images:
+    #        grid = torchvision.utils.make_grid(images[k])
+    #        grids[f"{split}/{k}"] = wandb.Image(grid)
+    #    pl_module.logger.experiment.log(grids)
+
+    #@rank_zero_only
+    #def _testtube(self, pl_module, images, batch_idx, split):
+    #    for k in images:
+    #        grid = torchvision.utils.make_grid(images[k])
+    #        grid = (grid+1.0)/2.0 # -1,1 -> 0,1; c,h,w
+
+    #        tag = f"{split}/{k}"
+    #        pl_module.logger.experiment.add_image(
+    #            tag, grid,
+    #            global_step=pl_module.global_step)
 
     @rank_zero_only
     def log_local(self, save_dir, split, images,
@@ -310,7 +357,6 @@ if __name__ == "__main__":
 
     # add cwd for convenience and to make classes in this file available when
     # running as `python main.py`
-    # (in particular `main.DataModuleFromConfig`)
     sys.path.append(os.getcwd())
 
     parser = get_parser()
@@ -323,6 +369,9 @@ if __name__ == "__main__":
             "If you want to resume training in a new log folder, "
             "use -n/--name in combination with --resume_from_checkpoint"
         )
+    meta_cfg = os.path.join(os.path.dirname(__file__), 'configs', 'meta_config.yaml')
+    meta_config = OmegaConf.load(meta_cfg)
+
     if opt.resume:
         if not os.path.exists(opt.resume):
             raise ValueError("Cannot find {}".format(opt.resume))
@@ -351,7 +400,7 @@ if __name__ == "__main__":
         else:
             name = ""
         nowname = now+name+opt.postfix
-        logdir = os.path.join(opt.logdir, nowname)
+        logdir = os.path.join(meta_config.logdir, nowname)
 
     ckptdir = os.path.join(logdir, "checkpoints")
     cfgdir = os.path.join(logdir, "configs")
@@ -379,12 +428,18 @@ if __name__ == "__main__":
             cpu = False
         trainer_opt = argparse.Namespace(**trainer_config)
         lightning_config.trainer = trainer_config
+        
+        parse_meta_config(meta_config, config)
 
         # model
         model = instantiate_from_config(config.model)
 
         # trainer and callbacks
         trainer_kwargs = dict()
+        
+        default_root = os.path.join(os.path.dirname(__file__), 'experiment_root_dirs', opt.name)
+        os.makedirs(default_root, exist_ok=True)
+        trainer_kwargs["default_root_dir"] = default_root
 
         # default logger configs
         # NOTE wandb < 0.10.0 interferes with shutdown
@@ -392,24 +447,32 @@ if __name__ == "__main__":
         # debugging (wrongly sized pudb ui)
         # thus prefer testtube for now
         default_logger_cfgs = {
-            "wandb": {
-                "target": "pytorch_lightning.loggers.WandbLogger",
+            #"wandb": {
+            #    "target": "pytorch_lightning.loggers.WandbLogger",
+            #    "params": {
+            #        "name": nowname,
+            #        "save_dir": logdir,
+            #        "offline": opt.debug,
+            #        "id": nowname,
+            #    }
+            #},
+            #"testtube": {
+            #    "target": "pytorch_lightning.loggers.TestTubeLogger",
+            #    "params": {
+            #        "name": "testtube",
+            #        "save_dir": logdir,
+            #    }
+            #},
+            "tensorboard": {
+                "target": "pytorch_lightning.loggers.TensorBoardLogger",
                 "params": {
-                    "name": nowname,
-                    "save_dir": logdir,
-                    "offline": opt.debug,
-                    "id": nowname,
-                }
-            },
-            "testtube": {
-                "target": "pytorch_lightning.loggers.TestTubeLogger",
-                "params": {
-                    "name": "testtube",
+                    "name": "tensorboard",
                     "save_dir": logdir,
                 }
-            },
+            }
         }
-        default_logger_cfg = default_logger_cfgs["testtube"]
+        #default_logger_cfg = default_logger_cfgs["testtube"]
+        default_logger_cfg = default_logger_cfgs["tensorboard"]
         logger_cfg = lightning_config.get("logger", OmegaConf.create())
         logger_cfg = OmegaConf.merge(default_logger_cfg, logger_cfg)
         trainer_kwargs["logger"] = instantiate_from_config(logger_cfg)
@@ -479,9 +542,9 @@ if __name__ == "__main__":
         trainer_kwargs["callbacks"] = [instantiate_from_config(callbacks_cfg[k]) for k 
                 in callbacks_cfg] + [instantiate_from_config(modelckpt_cfg)]
         
-        if isinstance(data, DataModuleFromConfig) and (isinstance(data.datasets["train"],KITTIPlusNuscenesTrain) or 
-                isinstance(data.datasets["train"],NuscenesSegmentationTrain)):
-            trainer_kwargs["callbacks"] += [ShuffleCallback(dataset=data.datasets["train"])]
+        #if isinstance(data, DataModuleFromConfig) and (isinstance(data.datasets["train"],KITTIPlusNuscenesTrain) or 
+        #        isinstance(data.datasets["train"],NuscenesSegmentationTrain)):
+        trainer_kwargs["callbacks"] += [ShuffleCallback(dataset=data.datasets["train"])]
 
         trainer = Trainer.from_argparse_args(trainer_opt, **trainer_kwargs)
 
@@ -510,31 +573,32 @@ if __name__ == "__main__":
             if trainer.global_rank == 0:
                 import pudb; pudb.set_trace()
 
-        import signal
-        signal.signal(signal.SIGUSR1, melk)
-        signal.signal(signal.SIGUSR2, divein)
+        #import signal
+        #signal.signal(signal.SIGUSR1, melk)
+        #signal.signal(signal.SIGUSR2, divein)
 
         # run
         if opt.train:
-            try:
-                trainer.fit(model, data)
-            except Exception:
-                melk()
-                raise
+            #try:
+            trainer.fit(model, data)
+            #except Exception:
+            #    melk()
+            #    raise
         if not opt.no_test and not trainer.interrupted:
             trainer.test(model, data)
     except Exception:
-        if opt.debug and trainer.global_rank==0:
-            try:
-                import pudb as debugger
-            except ImportError:
-                import pdb as debugger
-            debugger.post_mortem()
         raise
-    finally:
+   #     if opt.debug and trainer.global_rank==0:
+   #         try:
+   #             import pudb as debugger
+   #         except ImportError:
+   #             import pdb as debugger
+   #         debugger.post_mortem()
+   #     raise
+   # finally:
         # move newly created debug project to debug_runs
-        if opt.debug and not opt.resume and trainer.global_rank==0:
-            dst, name = os.path.split(logdir)
-            dst = os.path.join(dst, "debug_runs", name)
-            os.makedirs(os.path.split(dst)[0], exist_ok=True)
-            os.rename(logdir, dst)
+   #     if opt.debug and not opt.resume and trainer.global_rank==0:
+   #         dst, name = os.path.split(logdir)
+   #         dst = os.path.join(dst, "debug_runs", name)
+   #         os.makedirs(os.path.split(dst)[0], exist_ok=True)
+   #         os.rename(logdir, dst)

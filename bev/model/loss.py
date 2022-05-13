@@ -28,6 +28,40 @@ class BCELoss(nn.Module):
         loss = F.binary_cross_entropy_with_logits(prediction,target, weight=mask)
         return loss, {"{}/loss".format(split): loss.clone().detach().mean()}
 
+class UncertaintyLoss(nn.Module):
+
+    def __init__(self, priors):
+        super().__init__()
+        
+        assert priors in ['nuscenes']
+        if priors == 'nuscenes':
+            self.register_buffer('priors', torch.Tensor(list(NUSCENES_PRIORS.values())))
+
+    def forward(self, prediction, mask, split):
+        priors = self.priors.view(1, -1, 1, 1).expand_as(prediction)
+        xent = F.binary_cross_entropy_with_logits(prediction, priors, reduce=False)
+        loss = (xent * (~mask).float().unsqueeze(1)).mean()
+        return loss, {"{}/loss".format(split): loss.clone().detach().mean()}
+
+class BCEUncertaintyLoss(nn.Module):
+
+    def __init__(self, priors, xent_weight=1, unc_weight=0.001):
+        super().__init__()
+        
+        self.xent_weight = xent_weight
+        self.unc_weight = unc_weight
+        self.bce_loss = BCELoss(priors)
+        self.unc_loss = UncertaintyLoss(priors)
+
+    def forward(self, prediction, target, mask, split):
+        bce, _ = self.bce_loss(prediction, target, mask, split)
+        unc, _ = self.unc_loss(prediction, mask, split)
+        loss = self.xent_weight * bce + self.unc_weight * unc
+        return loss, {"{}/total_loss".format(split): loss.clone().detach().mean(),
+                      "{}/bce_loss".format(split): bce.detach().mean(),
+                      "{}/unc_loss".format(split): unc.detach().mean(),}
+        
+
 class DummyLoss(nn.Module):
     def __init__(self):
         super().__init__()
@@ -46,7 +80,7 @@ class CELoss(nn.Module):
         loss *= mask
         loss = loss.mean()
 
-        return loss, {"{}/loss".format(split): loss_combined.clone().detach().mean()}
+        return loss, {"{}/loss".format(split): loss.clone().detach().mean()}
 
 
 class VEDLoss(nn.Module):

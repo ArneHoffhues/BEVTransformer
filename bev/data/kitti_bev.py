@@ -71,6 +71,7 @@ class KITTIBEVBase(Dataset):
         else:
             self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image'},
                     keypoint_params=albumentations.KeypointParams(format='xy'))
+    
 
     def __len__(self):
         return len(self.samples)

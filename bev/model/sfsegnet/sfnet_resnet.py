@@ -176,11 +176,11 @@ class AlignNetResNet(nn.Module):
         #    return self.criterion(x, gts)
         return main_out
 
-def DeepR18_SF_deeply_dsn(num_classes, snapshot):
+def DeepR18_SF_deeply_dsn(num_classes, pretrained_path):
     """
     ResNet-18 Based Network wtih DSN supervision
     """
 
     net = AlignNetResNet(num_classes, trunk='resnet-18-deep', criterion=None, variant='D', skip='m1', fpn_dsn=True)
-    net = restore_snapshot(net, snapshot=snapshot, ignore_keys=['module.head.conv_last'])
+    net = restore_snapshot(net, snapshot=pretrained_path, ignore_keys=['module.head.conv_last'])
     return net

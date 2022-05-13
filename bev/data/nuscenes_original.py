@@ -16,7 +16,8 @@ class NuscenesSegmentationBase(Dataset):
 
         self.n_labels = n_labels
         self.dataset_size = dataset_size
-        
+        self.split = split
+
         assert split in ["train", "val"]
         if split == "train":
             self.scene_names = NUSCENES_TRAIN_SCENES
@@ -37,13 +38,13 @@ class NuscenesSegmentationBase(Dataset):
             self.cropper =albumentations.CenterCrop(height= 800, width = 800)
 
         self.flip = albumentations.HorizontalFlip(p=self.flip_prob)
-
+        self.vflip = albumentations.VerticalFlip(p=1.0)
 
         if self.rgb_size is not None and self.bev_size is not None:
             #self.rescaler = albumentations.SmallestMaxSize(max_size = self.size)
             self.bev_rescaler = albumentations.Resize(*self.bev_size, interpolation=0)
             self.rgb_rescaler = albumentations.Resize(*self.rgb_size)
-            self.bev_preprocessor = albumentations.Compose([self.cropper, self.bev_rescaler], additional_targets={'mask': 'image'})
+            self.bev_preprocessor = albumentations.Compose([self.cropper, self.bev_rescaler, self.vflip], additional_targets={'mask': 'image'})
             if self.depth_path is not None: 
                 self.preprocessor = albumentations.Compose([self.flip], additional_targets={'bev': 'image', 'mask': 'image', 'depth': 'image'})
             else:
@@ -59,7 +60,11 @@ class NuscenesSegmentationBase(Dataset):
             self.dataset_size = len(self.labels)
         else:
             assert self.dataset_size <= len(self.labels)
-        self.shuffle_samples()
+
+        if self.split == 'train':
+            self.shuffle_samples()
+        else:
+            self.shuffled_indices = torch.arange(len(self.labels))
 
     
     def get_tokens(self, scene_names=None):
@@ -85,10 +90,12 @@ class NuscenesSegmentationBase(Dataset):
 
 
     def shuffle_samples(self):
-        self.samples = random.sample(self.labels, self.dataset_size) 
+        self.shuffled_indices = torch.randperm(len(self.labels))
+        if not self.dataset_size == len(self.labels):
+            self.shuffled_indices = self.shuffled_indices[:self.dataset_size] 
 
     def __len__(self):
-        return len(self.samples)
+        return self.dataset_size
 
     def decode_binary_labels(self, labels, n_class=15):
         bits = torch.pow(2, torch.arange(n_class))
@@ -99,12 +106,14 @@ class NuscenesSegmentationBase(Dataset):
         img_name = token + ".png"
         labels = to_tensor(Image.open(os.path.join(self.label_path, img_name))).long()
         labels = self.decode_binary_labels(labels)
-        bev, mask = labels[:-1].numpy().astype(np.uint8), (~labels[-1].numpy() * 1).astype(np.uint8)
+        bev, mask = labels[:-1].numpy().astype(np.uint8), (~labels[-1].numpy()).astype(np.uint8)
         bev = np.moveaxis(bev, 0, -1)
 
         bev_preprocessed = self.bev_preprocessor(image = bev, mask = mask)
-        bev = cv2.rotate(bev_preprocessed["image"], cv2.ROTATE_180)
-        mask = cv2.rotate(bev_preprocessed["mask"], cv2.ROTATE_180)
+        bev = bev_preprocessed["image"]
+        mask = bev_preprocessed["mask"]
+        #bev = cv2.rotate(bev_preprocessed["image"], cv2.ROTATE_180)
+        #mask = cv2.rotate(bev_preprocessed["mask"], cv2.ROTATE_180)
 
         rgb_img = np.asarray(Image.open(self.nuscenes.get_sample_data_path(token))).astype(np.uint8)
         rgb_img = self.rgb_rescaler(image=rgb_img)["image"]
@@ -150,7 +159,7 @@ class NuscenesSegmentationBase(Dataset):
 
     def __getitem__(self, i):
         example = dict()
-        data = self.preprocess_image(self.samples[i])
+        data = self.preprocess_image(self.labels[self.shuffled_indices[i]])
         example["image"] = data["image"]
         example["mask"] = data["mask"]
         example["bev"] = data["bev"]

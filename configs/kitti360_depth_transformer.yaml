@@ -22,7 +22,7 @@ model:
       target: bev.model.sfsegnet.sfnet_resnet.DeepR18_SF_deeply_dsn
       params:
         num_classes: 19
-        snapshot: ./pretrained/SFSegNet/sfnet_r18_map.pth
+        snapshot: SFSegNet/sfnet_r18_map.pth
     depth_module_config:
       target: bev.model.depth_projection.depth_module.GridAssembler
       params:
@@ -74,15 +74,13 @@ data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
     batch_size: 3
-    num_workers: 3
+    num_workers: 4
+    dataset: kitti360
+    with_depth: True
     train:
       target: bev.data.kitti360_bev.KITTI360BEVTrain
       params:
         n_labels: 10
-        rgb_root: /globalwork/data/KITTI-360
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
-        depth_root: /globalwork/hoffhues/PanopticBEV_images/KITTI360/depth/train
-        with_depth: True
         preprocess_param:
           rgb_size: [288, 1056]
           bev_size: [676, 676]
@@ -95,10 +93,6 @@ data:
       target: bev.data.kitti360_bev.KITTI360BEVValidation
       params:
         n_labels: 10
-        rgb_root: /globalwork/data/KITTI-360
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
-        depth_root: /globalwork/hoffhues/PanopticBEV_images/KITTI360/depth/val
-        with_depth: True
         preprocess_param:
           rgb_size: [288, 1056]
           bev_size: [676, 676]

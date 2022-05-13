@@ -9,6 +9,7 @@ __pycache__/
 #others
 pretrained/
 logs/
+experiment_root_dirs
 
 # C extensions
 *.so

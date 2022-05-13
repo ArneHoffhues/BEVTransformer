@@ -45,7 +45,7 @@ model:
       target: bev.model.backbone.swin.SwinFPN
       params:      
         variant: 'tiny'
-        pretrained_path: /home/hoffhues/master_repositories/BEVTransformer/pretrained/mask_rcnn_swin_tiny_patch4_window7.pth
+        snapshot: mask_rcnn_swin_tiny_patch4_window7.pth
     net3d_config:
       target: bev.model.3d_feature_extractor.Net3D
       params:
@@ -84,12 +84,12 @@ data:
   params:
     batch_size: 2
     num_workers: 4
+    dataset: nuscenes_bev
+    with_depth: False
     train:
       target: bev.data.nuscenes_bev.NuScenesBEVTrain
       params:
         n_labels: 9
-        rgb_root: /globalwork/data/nuScenes-v1.0
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
         preprocess_param:
           rgb_size: [448, 768]
           bev_size: [650, 650]
@@ -99,8 +99,6 @@ data:
       target: bev.data.nuscenes_bev.NuScenesBEVValidation
       params:
         n_labels: 9
-        rgb_root: /globalwork/data/nuScenes-v1.0
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
         preprocess_param:
           rgb_size: [448, 768]
           bev_size: [650, 650]

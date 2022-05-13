@@ -26,6 +26,8 @@ class BEVTransformer(pl.LightningModule):
                  colorize=None,
                  ckpt_path=None,
                  ignore_index = None,
+                 mask_ignore = False,
+                 score_threshold = None,
                  ignore_keys=[],
                  rgb_key = 'image',
                  bev_key = 'bev',
@@ -40,6 +42,8 @@ class BEVTransformer(pl.LightningModule):
         self.n_labels = n_labels
         self.class_names = class_names
         self.ignore_index = ignore_index
+        self.mask_ignore = mask_ignore
+        self.score_threshold = score_threshold
          
         #self.train_conf_mat = BinaryConfusionMatrix(n_labels)
         #self.val_conf_mat = BinaryConfusionMatrix(n_labels)
@@ -74,7 +78,7 @@ class BEVTransformer(pl.LightningModule):
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
 
         if colorize is not None:
-            if self.ignore_index is None:
+            if self.ignore_index is None and not mask_ignore:
                 assert len(colorize) == self.n_labels
             else:
                 assert len(colorize) == self.n_labels + 1
@@ -134,8 +138,12 @@ class BEVTransformer(pl.LightningModule):
             loss, loss_dict = self.loss(logits, bev, mask, split)
 
         #loss, loss_dict = self.loss(logits, bev, mask, split)
-
-        pred = self.logits_to_one_hot(logits)
+        
+        if self.score_threshold:
+            scores = logits.sigmoid()
+            pred = scores > self.score_threshold
+        else:
+            pred = self.logits_to_one_hot(logits)
         bev = self.labels_to_one_hot(bev)
         
         if self.ignore_index is None:
@@ -199,6 +207,7 @@ class BEVTransformer(pl.LightningModule):
                                   lr=lr, betas=(0.5, 0.9))
         return opt
     
+    @torch.no_grad()
     def log_images(self, batch, **kwargs):
         N = 4
 
@@ -211,9 +220,7 @@ class BEVTransformer(pl.LightningModule):
         assert bev.shape[1] == self.n_labels
         # convert logits to indices
         bev = torch.argmax(bev, dim=1, keepdim=True)
-        if self.ignore_index is None:
-            bev = F.one_hot(bev, num_classes=self.n_labels)
-        else:
+        if self.ignore_index:
             bev = F.one_hot(bev, num_classes = self.n_labels + 1)
             ignore_region = bev_gt == self.ignore_index
             bev_non_hall = bev.clone().detach()
@@ -222,11 +229,33 @@ class BEVTransformer(pl.LightningModule):
             bev_non_hall = bev_non_hall.squeeze(1).permute(0, 3, 1, 2).float()
             bev_non_hall = self.to_rgb(bev_non_hall)
             log["bev_not_hallucinated"] = bev_non_hall
+        elif self.mask_ignore:
+            mask = mask.unsqueeze(1).bool()
+            mask = ~mask
+            bev = F.one_hot(bev, num_classes = self.n_labels + 1)
+            bev_non_hall = bev.clone().detach()
+            bev_non_hall[:, :, :, :, -1][mask] = 1
+            bev_non_hall[:, :, :, :, :-1][mask] = 0
+            bev_non_hall = bev_non_hall.squeeze(1).permute(0, 3, 1, 2).float()
+            bev_non_hall = self.to_rgb(bev_non_hall)
+            log["bev_not_hallucinated"] = bev_non_hall
+        else:
+            bev = F.one_hot(bev, num_classes=self.n_labels)
         bev = bev.squeeze(1).permute(0, 3, 1, 2).float()
         bev = self.to_rgb(bev)
         log["inputs"] = x
         if self.ignore_index is not None:
             bev_gt = self.labels_to_one_hot(bev_gt).float()
+        if self.mask_ignore:
+            B, C, H, W = bev_gt.shape
+            unlabeled = torch.zeros((B, 1, H, W), device = x.device, dtype=bool)
+            for i in reversed(range(bev_gt.shape[1])):
+                mask = (bev_gt[:, i, :, :] == 1).unsqueeze(1)
+                unlabeled[mask] = 1
+                zero_mask = mask.repeat(1, i, 1, 1)
+                bev_gt[:, :i, :, :][zero_mask] = 0
+            unlabeled = (~unlabeled).float()
+            bev_gt = torch.cat((bev_gt, unlabeled), 1)
         log["bev_gt"] = self.to_rgb(bev_gt)
         log["bev_hallucinated"] = bev
         return log
@@ -350,7 +379,8 @@ class BEVTransformerWithDepth(BEVTransformer):
             bev, conf_mat_mask = bev[:, :-1, :, :], ~bev[:,-1, :, :].bool()
 
         return loss, loss_dict, pred, bev, conf_mat_mask
-
+    
+    @torch.no_grad()
     def log_images(self, batch, **kwargs):
         N = 4
 
@@ -496,7 +526,8 @@ class DepthAndSegUpsampler(BEVTransformer):
             bev, conf_mat_mask = bev[:, :-1, :, :], ~bev[:,-1, :, :].bool()
 
         return loss, loss_dict, pred, bev, conf_mat_mask
-
+    
+    @torch.no_grad()
     def log_images(self, batch, **kwargs):
         N = 4
 

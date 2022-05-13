@@ -47,7 +47,7 @@ model:
       target: bev.model.backbone.swin.SwinFPN
       params:      
         variant: 'tiny'
-        pretrained_path: /home/hoffhues/master_repositories/BEVTransformer/pretrained/mask_rcnn_swin_tiny_patch4_window7.pth
+        snapshot: mask_rcnn_swin_tiny_patch4_window7.pth
     net3d_config:
       target: bev.model.3d_feature_extractor.Net3D
       params:
@@ -86,12 +86,12 @@ data:
   params:
     batch_size: 3
     num_workers: 4
+    dataset: kitti360
+    with_depth: False
     train:
       target: bev.data.kitti360_bev.KITTI360BEVTrain
       params:
         n_labels: 10
-        rgb_root: /globalwork/data/KITTI-360
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
         preprocess_param:
           rgb_size: [384, 1408]
           bev_size: [676, 676]
@@ -104,8 +104,6 @@ data:
       target: bev.data.kitti360_bev.KITTI360BEVValidation
       params:
         n_labels: 10
-        rgb_root: /globalwork/data/KITTI-360
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
         preprocess_param:
           rgb_size: [384, 1408]
           bev_size: [676, 676]

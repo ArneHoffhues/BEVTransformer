@@ -1,0 +1,17 @@
+datasets:
+  kitti360:
+    gt: /globalwork/data/KITTI-360
+    labels: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
+    depth: /globalwork/hoffhues/PanopticBEV_images/KITTI360/depth
+  nuscenes_bev:
+    gt: /globalwork/data/nuScenes-v1.0
+    labels: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
+    depth: /globalwork/hoffhues/PanopticBEV_images/nuScenes/depth/
+  nuscenes_pon:
+    gt: /globalwork/data/nuScenes-v1.0
+    version: v1.0-trainval
+    labels: /globalwork/hoffhues/mono-semantic-maps_labels/nuscenes/map-labels-v1.2
+
+pretrained_path: /home/hoffhues/master_repositories/BEVTransformer/pretrained
+
+logdir: /globalwork/hoffhues/BEVTransformer/logs

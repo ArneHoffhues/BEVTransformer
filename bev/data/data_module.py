@@ -1,6 +1,6 @@
 import pytorch_lightning as pl
 from bev.utils import instantiate_from_config
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, RandomSampler
 from nuscenes import NuScenes
 
 class WrappedDataset(Dataset):
@@ -49,7 +49,7 @@ class DataModuleFromConfig(pl.LightningDataModule):
 
     def _train_dataloader(self):
         return DataLoader(self.datasets["train"], batch_size=self.batch_size,
-                          num_workers=self.num_workers, shuffle=True, drop_last=True)
+                          num_workers=self.num_workers, drop_last=True)
 
     def _val_dataloader(self):
         return DataLoader(self.datasets["validation"],

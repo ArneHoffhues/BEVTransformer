@@ -21,7 +21,7 @@ model:
       target: bev.model.sfsegnet.sfnet_resnet.DeepR18_SF_deeply_dsn
       params:
         num_classes: 19
-        snapshot: ./pretrained/SFSegNet/sfnet_r18_map.pth
+        snapshot: SFSegNet/sfnet_r18_map.pth
     depth_module_config:
       target: bev.model.depth_projection.depth_module.GridAssembler
       params:
@@ -72,16 +72,14 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 2
-    num_workers: 4
+    batch_size: 7
+    num_workers: 8
+    dataset: nuscenes_bev
+    with_depth: True
     train:
       target: bev.data.nuscenes_bev.NuScenesBEVTrain
       params:
         n_labels: 9
-        rgb_root: /globalwork/data/nuScenes-v1.0
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
-        depth_root: /globalwork/hoffhues/PanopticBEV_images/nuScenes/depth/train
-        with_depth: True
         preprocess_param:
           rgb_size: [448, 768]
           bev_size: [650, 650]
@@ -91,10 +89,6 @@ data:
       target: bev.data.nuscenes_bev.NuScenesBEVValidation
       params:
         n_labels: 9
-        rgb_root: /globalwork/data/nuScenes-v1.0
-        bev_root: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
-        depth_root: /globalwork/hoffhues/PanopticBEV_images/nuScenes/depth/val
-        with_depth: True
         preprocess_param:
           rgb_size: [448, 768]
           bev_size: [650, 650]

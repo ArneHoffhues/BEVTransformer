@@ -2,6 +2,7 @@ import numpy as np
 import os
 import albumentations
 from PIL import Image
+import torch
 from torch.utils.data import Dataset
 import cv2
 import json
@@ -85,7 +86,12 @@ class KITTI360BEVBase(Dataset):
         
         assert split in ['train', 'val']
         self.meta, self.images, self.img_map = self._load_split(split) 
-    
+        
+        if split == 'train':
+            self.shuffled_indices = torch.randperm(len(self.images))
+        else:
+            self.shuffled_indices = torch.arange(len(self.images))
+
         if self.crop_region is not None and len(self.crop_region) == 4:
             x_min, y_min, x_max, y_max = self.crop_region
             self.cropper = albumentations.Crop(x_min=x_min, y_min=y_min, x_max=x_max, y_max=y_max)
@@ -128,6 +134,9 @@ class KITTI360BEVBase(Dataset):
         images = [img_desc for img_desc in metadata["images"] if img_desc["id"] in lst]
 
         return meta, images, img_map
+    
+    def shuffle_samples(self):
+        self.shuffled_indices = torch.randperm(len(self.images))
 
     def __len__(self):
         return len(self.images)
@@ -242,7 +251,7 @@ class KITTI360BEVBase(Dataset):
 
     def __getitem__(self, i):
         example = dict()
-        preprocessed = self.preprocess_sample(self.images[i])
+        preprocessed = self.preprocess_sample(self.images[self.shuffled_indices[i]])
         example["image"] = preprocessed["image"]
         example["mask"] = preprocessed["mask"]
         example["bev"] = preprocessed["bev"]
