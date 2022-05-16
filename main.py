@@ -96,6 +96,15 @@ def get_parser(**parser_kwargs):
         default="",
         help="post-postfix for default name",
     )
+    parser.add_argument(
+        "-ar",
+        "--autoresume",
+        type=str2bool,
+        nargs="?",
+        const=True,
+        default=True,
+        help="enabling of autoresume in case training fails",
+    )
     #parser.add_argument(
     #    "--logdir",
     #    type=str,
@@ -368,9 +377,29 @@ if __name__ == "__main__":
             "-n/--name and -r/--resume cannot be specified both."
             "If you want to resume training in a new log folder, "
             "use -n/--name in combination with --resume_from_checkpoint"
-        )
+        )   
+
     meta_cfg = os.path.join(os.path.dirname(__file__), 'configs', 'meta_config.yaml')
     meta_config = OmegaConf.load(meta_cfg)
+    
+    if opt.autoresume:
+        assert opt.name is not None
+
+        last_exp_file = os.path.join(os.path.dirname(__file__), 'experiment_root_dirs', opt.name, "last_experiment.txt")
+        if os.path.exists(last_exp_file):
+            with open(last_exp_file) as f:
+                last_exp_dir = f.read().splitlines()[0]
+                autoresume_dir = os.path.join(meta_config.logdir, last_exp_dir)
+                if os.path.exists(autoresume_dir):
+                    if not os.path.exists(os.path.join(autoresume_dir, "checkpoints", "last.ckpt")):
+                        autoresume_dir = None
+                else:
+                    autoresume_dir = None
+        else:
+            autoresume_dir = None
+    
+    if autoresume_dir and not opt.resume:
+        opt.resume = autoresume_dir
 
     if opt.resume:
         if not os.path.exists(opt.resume):
@@ -385,7 +414,7 @@ if __name__ == "__main__":
             logdir = opt.resume.rstrip("/")
             ckpt = os.path.join(logdir, "checkpoints", "last.ckpt")
 
-        opt.resume_from_checkpoint = ckpt
+        ckpt_path = ckpt
         base_configs = sorted(glob.glob(os.path.join(logdir, "configs/*.yaml")))
         opt.base = base_configs+opt.base
         _tmp = logdir.split("/")
@@ -401,6 +430,7 @@ if __name__ == "__main__":
             name = ""
         nowname = now+name+opt.postfix
         logdir = os.path.join(meta_config.logdir, nowname)
+        ckpt_path = None
 
     ckptdir = os.path.join(logdir, "checkpoints")
     cfgdir = os.path.join(logdir, "configs")
@@ -440,6 +470,9 @@ if __name__ == "__main__":
         default_root = os.path.join(os.path.dirname(__file__), 'experiment_root_dirs', opt.name)
         os.makedirs(default_root, exist_ok=True)
         trainer_kwargs["default_root_dir"] = default_root
+        last_exp_file = os.path.join(default_root, "last_experiment.txt")
+        with open(last_exp_file, 'w') as f:
+            f.write(nowname)
 
         # default logger configs
         # NOTE wandb < 0.10.0 interferes with shutdown
@@ -492,9 +525,12 @@ if __name__ == "__main__":
             "target": "pytorch_lightning.callbacks.ModelCheckpoint",
             "params": {
                 "dirpath": ckptdir,
-                "filename": "{epoch:06}",
+                "filename": 'epoch_{epoch:02d}-val_iou_mean_{val/IoU/MEAN:.4f}',
+                "auto_insert_metric_name": False,
                 "verbose": True,
                 "save_last": True,
+                "monitor": 'val/IoU/MEAN',
+                "mode": 'max',
             }
         }
         if hasattr(model, "monitor"):
@@ -580,12 +616,12 @@ if __name__ == "__main__":
         # run
         if opt.train:
             #try:
-            trainer.fit(model, data)
+            trainer.fit(model, data, ckpt_path=ckpt_path)
             #except Exception:
             #    melk()
             #    raise
         if not opt.no_test and not trainer.interrupted:
-            trainer.test(model, data)
+            trainer.test(model, data, ckpt_path=ckpt_path)
     except Exception:
         raise
    #     if opt.debug and trainer.global_rank==0:

@@ -88,7 +88,7 @@ data:
       target: bev.data.nuscenes_original.NuscenesSegmentationTrain
       params:
         n_labels: 14
-        dataset_size: 50000
+        dataset_size: 20
         preprocess_param:
           crop_region: [0, 0, 200, 196]
           flip_prob: 0.5
@@ -98,6 +98,7 @@ data:
       target: bev.data.nuscenes_original.NuscenesSegmentationValidation
       params:
         n_labels: 14
+        dataset_size: 20 
         preprocess_param:
           crop_region: [0, 0, 200, 196]
           flip_prob: 0.0
