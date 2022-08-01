@@ -2,9 +2,9 @@ model:
   base_learning_rate: 4.5e-06
   target: bev.model.model.BEVTransformer
   params:
-    n_labels: 10
+    n_labels: 11
     n_embed: 256
-    class_names: ['road', 'sidewalk', 'building', 'wall', 'vegetation', 'terrain', 'person',
+    class_names: ['road', 'sidewalk', 'building', 'wall', 'vegetation', 'terrain', 'occlusion', 'person',
                   'rider', 'car', 'truck']
     colorize: [[255, 0, 255],
                [75, 0, 75],
@@ -12,6 +12,7 @@ model:
                [255, 120, 50],
                [0, 175, 0],
                [150, 240, 80],
+               [128, 128, 128],
                [255, 30, 30],
                [100, 230, 245],
                [100, 150, 245],
@@ -21,7 +22,7 @@ model:
     transformer_config:
       target: bev.model.transformer.SamplingTransformer
       params:
-        bev_grid_size: [50, 50]
+        bev_grid_size: [52, 57]
         grid_cell_width: 1
         vertical_sampling_range: [-3, 3]
         n_samples_vertical: 20
@@ -34,11 +35,14 @@ model:
         dim_feedforward: 1024
         normalize_before: False
         activation: 'relu'
-        with_cross_attention: False
     pos_encoding_config:
       target: bev.model.pos_encoding.PositionEmbeddingSine
       params:
         num_pos_feats: 128
+    height_pos_encoding_config:
+      target: bev.model.pos_encoding.PositionEmbeddingSineHeight
+      params:
+        num_pos_feats: 256
     backbone_config:
       target: bev.model.backbone.swin.SwinFPN
       params:      
@@ -50,19 +54,18 @@ model:
         scales: [4, 8, 16, 32, 64]
         in_ch: 256
         out_ch: 256
-        n_classes: 10
-        bev_grid_size: [50, 50]
+        n_classes: 11
+        bev_grid_size: [52, 57]
         grid_cell_width: 1
         vertical_sampling_range: [-3, 3]
         n_samples: 20
         initialization_level: -0.5
-        ground_projected: True
     decoder_config:
       target: bev.model.decoder.Decoder
       params:
         in_channels: 256
-        num_classes: 10
-        final_res: [676, 676]
+        num_classes: 11
+        final_res: [704, 768]
         predict_vis: True
         layers: [6, 4, 4, 4]
         strides: [1, 2, 2, 2]
@@ -72,42 +75,46 @@ model:
         extrinsics:
           translation: [0.8, 0.3, 1.55]
           rotation: [-85, 0, 180]
-        background_classes: [2, 3, 4, 5]
-        foreground_classes: [0, 1, 6, 7, 8, 9]
-        out_shape: [676, 676]
+        background_classes: [2, 3, 4, 5, 6]
+        foreground_classes: [0, 1, 7, 8, 9, 10]
+        loss_weights: [1, 10, 1]
+        out_shape: [704, 768]
         resolution: 0.074
-        priors: kitti360
+        priors: kitti360occlusion
 
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 5
+    batch_size: 4
     num_workers: 8
     dataset: kitti360
     with_depth: False
     train:
       target: bev.data.kitti360_bev.KITTI360BEVTrain
       params:
-        n_labels: 10
+        n_labels: 11
         preprocess_param:
           rgb_size: [384, 1408]
-          bev_size: [676, 676]
+          bev_size: [704, 768]
           bottom_crop_augmentation_prob: 0.
           side_crop_augmentation_prob: 0.
           rotate_augmentation_prob: 0.
           brightness_factor: 0
           contrast_factor: 0
+        mapping_param:
+          unique_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     validation:
       target: bev.data.kitti360_bev.KITTI360BEVValidation
       params:
-        n_labels: 10
+        n_labels: 11
         preprocess_param:
           rgb_size: [384, 1408]
-          bev_size: [676, 676]
+          bev_size: [704, 768]
           bottom_crop_augmentation_prob: 0.
           side_crop_augmentation_prob: 0.
           rotate_augmentation_prob: 0.
           flip_prob: 0.
           brightness_factor: 0
           contrast_factor: 0
-
+        mapping_param:
+          unique_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]

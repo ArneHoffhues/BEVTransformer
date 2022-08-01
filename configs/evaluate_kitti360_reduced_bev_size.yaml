@@ -1,0 +1,38 @@
+data:
+  target: bev.data.data_module.DataModuleFromConfig
+  params:
+    batch_size: 1
+    validation:
+      target: bev.data.kitti360_bev.KITTI360BEVValidation
+      params:
+        rgb_root: /globalwork/data/KITTI-360
+        bev_root: /globalwork/hoffhues/PanopticBEV_data/kitti360_panopticbev
+        depth_root: /globalwork/hoffhues/PanopticBEV_images/KITTI360/depth/val
+        n_labels: 10
+        preprocess_param:
+          rgb_size: [384, 1408]
+          bev_size: [200, 200]
+          bottom_crop_augmentation_prob: 0.
+          side_crop_augmentation_prob: 0.
+          rotate_augmentation_prob: 0.
+          flip_prob: 0.
+          brightness_factor: 0
+          contrast_factor: 0 
+
+eval:
+  n_classes: 10
+  class_names: ['road', 'sidewalk', 'building', 'wall', 'vegetation', 'terrain', 'person',
+                  'rider', 'car', 'truck']
+  colorize: [[255, 0, 255],
+               [75, 0, 75],
+               [255, 200, 0],
+               [255, 120, 50],
+               [0, 175, 0],
+               [150, 240, 80],
+               [255, 30, 30],
+               [100, 230, 245],
+               [100, 150, 245],
+               [80, 30, 180],
+               [0, 0, 0]]
+  inference_save_directory: /globalwork/hoffhues/BEV_data/inference/BEVTransformer
+  result_save_directory: /globalwork/hoffhues/BEV_data/results/BEVTransformer  

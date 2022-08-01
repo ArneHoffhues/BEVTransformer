@@ -397,6 +397,8 @@ if __name__ == "__main__":
                     autoresume_dir = None
         else:
             autoresume_dir = None
+    else:
+        autoresume_dir = None
     
     if autoresume_dir and not opt.resume:
         opt.resume = autoresume_dir

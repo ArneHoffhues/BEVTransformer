@@ -1,0 +1,34 @@
+data:
+  target: bev.data.data_module.DataModuleFromConfig
+  params:
+    batch_size: 1
+    validation:
+      target: bev.data.nuscenes_bev.NuScenesBEVValidation
+      params:
+        rgb_root: /globalwork/data/nuScenes-v1.0
+        bev_root: /globalwork/hoffhues/PanopticBEV_data/nuScenes_panopticbev
+        depth_root: /globalwork/hoffhues/PanopticBEV_images/nuScenes/depth/val
+        n_labels: 9
+        preprocess_param:
+          rgb_size: [448, 768]
+          bev_size: [650, 650]
+          flip_prob: 0.
+          brightness_factor: 0
+          contrast_factor: 0 
+
+eval:
+  n_classes: 9
+  class_names: ['road', 'sidewalk', 'manmade', 'vegetation', 'terrain', 'person',
+                  'car', 'truck', 'rider']
+  colorize: [[255, 0, 255],
+               [75, 0, 75],
+               [70, 70, 70],
+               [0, 175, 0],
+               [150, 240, 80],
+               [255, 30, 30],
+               [100, 150, 245],
+               [80, 30, 180],
+               [100, 230, 245],
+               [0, 0, 0]]
+  inference_save_directory: /globalwork/hoffhues/BEV_data/inference/BEVTransformer
+  result_save_directory: /globalwork/hoffhues/BEV_data/results/BEVTransformer  

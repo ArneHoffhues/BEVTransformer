@@ -62,6 +62,8 @@ class BEVTransformer(pl.LightningModule):
 
         if transformer_config is not None:
             self.transformer = instantiate_from_config(config=transformer_config)
+        else:
+            self.transformer = None
 
         if backbone_config is not None:
             self.backbone = instantiate_from_config(config=backbone_config)
@@ -416,28 +418,30 @@ class BEVTransformerWithDepth(BEVTransformer):
 
 class NoTransformer(BEVTransformer):
     def __init__(self,
-                 transformer_config,
+                 loss_config,
                  backbone_config,
                  net3d_config,
-                 loss_config,
+                 decoder_config,
                  n_labels,
                  n_embed,
+                 class_names=None,
                  colorize=None,
                  ckpt_path=None,
+                 ignore_index=None,
                  ignore_keys=[],
                  rgb_key = 'image',
                  bev_key = 'bev',
                  cam_key = 'cam',
                  mask_key = 'mask',
                  ):
-        super().__init__(transformer_config=transformer_config, backbone_config=backbone_config, net3d_config=net3d_config, loss_config=loss_config, n_labels=n_labels, 
-                n_embed=n_embed, colorize=colorize, ckpt_path=ckpt_path, ignore_keys=ignore_keys, rgb_key=rgb_key, bev_key=bev_key, cam_key=cam_key, mask_key=mask_key)
+        super().__init__(decoder_config=decoder_config, class_names=class_names, ignore_index=ignore_index, backbone_config=backbone_config, 
+                net3d_config=net3d_config, loss_config=loss_config, n_labels=n_labels, n_embed=n_embed, colorize=colorize, ckpt_path=ckpt_path, 
+                ignore_keys=ignore_keys, rgb_key=rgb_key, bev_key=bev_key, cam_key=cam_key, mask_key=mask_key)
 
 
     def forward(self, x, cam):
         f = self.backbone(x)
-        f_3d = self.net3d(f, cam)
-        collapsed = torch.mean(f_3d, 4)
+        _, collapsed = self.net3d(f, cam)
         out = self.decoder(collapsed)
 
         return out

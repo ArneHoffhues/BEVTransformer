@@ -16,6 +16,8 @@ from bev.model.model import BEVTransformer
 from bev.data.data_module import DataModuleFromConfig, ValModuleFromConfig
 from evaluation.confusion import BinaryConfusionMatrix
 from tqdm import tqdm
+from evaluation.panopticbev_eval.meters import AverageMeter, ConfusionMatrixMeter
+from evaluation.panopticbev_eval.conf_mat import confusion_matrix
 
 def get_parser(**parser_kwargs):
     def str2bool(v):
@@ -53,17 +55,8 @@ def get_parser(**parser_kwargs):
         "--dataset",
         type=str,
         default="kitti",
-        choices=["kitti", "kitti360", "nuscenes"],
+        choices=["kitti360", "nuscenes"],
         help="dataset to evaluate on",
-    )
-    parser.add_argument(
-        "-d",
-        "--depth",
-        type=str2bool,
-        const=True,
-        default=False,
-        nargs="?",
-        help="usage of depth",
     )
     
     return parser
@@ -94,7 +87,6 @@ if __name__ == "__main__":
     parser = get_parser()
     opt, unknown = parser.parse_known_args()
     exp_name=opt.savename
-    with_depth = opt.depth
     dataset = opt.dataset
 
     config = OmegaConf.load(opt.config)
@@ -104,15 +96,8 @@ if __name__ == "__main__":
     model_config_path = os.path.join(model_config_path, project_file)
     model_config = OmegaConf.load(model_config_path).model
     model_config.params.ckpt_path = os.path.join(ckpt_path, "checkpoints", "last.ckpt")
-    if os.path.getsize(model_config.params.ckpt_path) == 0:
-        ckpts = os.listdir(os.path.join(ckpt_path, "checkpoints"))
-        epoch_ckpt = [ckpt for ckpt in ckpts if ckpt.startswith('epoch=')][0]
-        ckpt = os.path.join(ckpt_path, "checkpoints", epoch_ckpt)
-        model_config.params.ckpt_path = ckpt
     model = instantiate_from_config(model_config)
     
-    if with_depth:
-        config.data.params.validation.params.with_depth = True
     data = instantiate_from_config(config.data)
     data.prepare_data()
     data.setup()
@@ -131,81 +116,47 @@ if __name__ == "__main__":
 
     model.eval()
 
-    # Initialise confusion matrix
-    confusion = BinaryConfusionMatrix(eval_config.n_classes)
-    
-    os.makedirs(os.path.join(base_inference_path, opt.savename, 'hallucinated'), exist_ok=True)
-    os.makedirs(os.path.join(base_inference_path, opt.savename, 'not_hallucinated'), exist_ok=True)
+    #sem_conf = ConfusionMatrixMeter(n_classes)
+    #sem_miou = AverageMeter(())
+    sem_conf_mat = torch.zeros(n_classes, n_classes, dtype=torch.double)
 
     for i,batch in enumerate(tqdm(data._val_dataloader())):
         
         img = batch['image'].permute(0,3,1,2).float()
-        if dataset == 'kitti':
-            bev = batch['bev'][:, :, :, 1:].permute(0,3,1,2).long()
-            mask = batch['mask'].bool()
-        else:
-            bev = batch['bev'].unsqueeze(1).long()
-            mask = (bev != 255).bool()
-            bev[bev == 255] = n_classes
-            bev = F.one_hot(bev, num_classes=n_classes + 1)
-            bev = bev.squeeze(1).permute(0, 3, 1, 2)
-            bev = bev[:, :-1, :, :]
+        bev = batch['bev'].long()
         cam = batch['cam'].float()
 
-        if with_depth:
-            depth = batch['depth'].unsqueeze(1).float()
 
         if torch.cuda.is_available():
             img = img.cuda()
             bev = bev.cuda()
-            mask = mask.cuda()
             cam = cam.cuda()
-            
-            if with_depth:
-                depth = depth.cuda()
         
         with torch.no_grad():
-            if with_depth:
-                logits, _ = model(img, cam, depth)
-            else:
-                logits, _ = model(img, cam)
+            logits, _ = model(img, cam)
         
         #sample = batch["sample"] if "sample" in batch else None
 
         amax = torch.argmax(logits, dim =1, keepdim= True)
-        one_hot = F.one_hot(amax, num_classes=eval_config.n_classes)
-        one_hot = one_hot.transpose(1, -1).squeeze(-1)
-
-        confusion.update(one_hot.bool(), bev.bool(), mask=mask)
         
-        if dataset == 'kitti':
-            seq_name, img_name  = data.datasets['validation'].samples[i]
-        elif dataset == 'kitti360' or dataset == 'nuscenes':
-            seq_name = data.datasets['validation'].split
-            img_name = data.datasets['validation'].images[i]['id'] + '.png'
-        else:
-            raise ValueError(f'unknown dataset name: {dataset}')
+        bev = bev.squeeze()
+        amax = amax.squeeze()
 
-        #img = np.squeeze(np.argmax(logits.cpu().numpy().transpose((0, 2, 3, 1)), axis = 3)).astype(np.uint8)
-        img = amax.squeeze().cpu().numpy().astype(np.uint8)
-        os.makedirs(os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name), exist_ok=True)
-        hal_image = Image.fromarray(img, 'P')
-        hal_image.putpalette(palette)
-        save_path = os.path.join(base_inference_path, opt.savename, 'hallucinated', seq_name, img_name)
-        hal_image.save(save_path)
-        os.makedirs(os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name), exist_ok=True)
-        mask = mask.squeeze().cpu().numpy().astype(bool)
-        img[~mask] = 255
-        non_hal_image = Image.fromarray(img, 'P')
-        non_hal_image.putpalette(palette)
-        save_path = os.path.join(base_inference_path, opt.savename, 'not_hallucinated', seq_name, img_name)
-        non_hal_image.save(save_path)
+        conf_mat = confusion_matrix(n_classes, amax, bev)
+        sem_conf_mat += conf_mat.cpu()
+
+        #sem_conf.update(conf_mat.cpu())
+    
+    sem_conf_mat = sem_conf_mat.cpu()[:n_classes, :]
+    sem_intersection = sem_conf_mat.diag()
+    sem_union = ((sem_conf_mat.sum(dim=1) + sem_conf_mat.sum(dim=0)[:n_classes] - sem_conf_mat.diag()) + 1e-8)
+    sem_miou = sem_intersection / sem_union
 
 
     os.makedirs(os.path.join(base_result_path), exist_ok=True)
     result_save_path = os.path.join(base_result_path, opt.savename + '.txt')
     with open(result_save_path, 'w') as file:
-        for name, iou_score in zip(eval_config.class_names, confusion.iou):
+        for name, iou_score in zip(eval_config.class_names, sem_miou):
             file.write('\n{:20s} {:.4f}'.format(name, iou_score))
-        file.write('\n{:20s} {:.4f}'.format('MEAN', confusion.mean_iou))
+        file.write('\n{:20s} {:.4f}'.format('MEAN', sem_miou.mean()))
 

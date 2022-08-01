@@ -34,11 +34,16 @@ model:
         dim_feedforward: 1024
         normalize_before: False
         activation: 'relu'
-        with_cross_attention: False
+        with_neighbourhood_attention: False
+        with_ray_attention: False
     pos_encoding_config:
       target: bev.model.pos_encoding.PositionEmbeddingSine
       params:
         num_pos_feats: 128
+    height_pos_encoding_config:
+      target: bev.model.pos_encoding.PositionEmbeddingSineHeight
+      params:
+        num_pos_feats: 256
     backbone_config:
       target: bev.model.backbone.swin.SwinFPN
       params:      
@@ -56,7 +61,6 @@ model:
         vertical_sampling_range: [-3, 3]
         n_samples: 20
         initialization_level: -0.5
-        ground_projected: True
     decoder_config:
       target: bev.model.decoder.Decoder
       params:
@@ -81,7 +85,7 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 5
+    batch_size: 12
     num_workers: 8
     dataset: kitti360
     with_depth: False

@@ -62,7 +62,7 @@ class NuScenesBEVBase(Dataset):
         assert len(self.unique_ids) == self.n_labels
         self.id_map = np.ones((256)) * 255
         self.id_map[self.unique_ids] = np.arange(len(self.unique_ids))
-        if mapping_param is not None:
+        if mapping_param is not None and 'remaps' in mapping_param:
             for k,v in mapping_param['remaps'].items():
                 k = int(k.replace("_", ""))
                 assert int(v) in range(self.n_labels)
@@ -70,7 +70,7 @@ class NuScenesBEVBase(Dataset):
         
         assert split in ['train', 'val']
         self.meta, self.images, self.img_map = self._load_split(split) 
-        
+
         if split == 'train':
             self.shuffled_indices = torch.randperm(len(self.images))
         else:

@@ -112,11 +112,19 @@ class CELossWithDistance(nn.Module):
                 del kitti_priors[-1]
                 del kitti_priors[7]
                 self.register_buffer('class_weights', torch.sqrt(1 / torch.Tensor(kitti_priors)))
+            elif priors == 'kitti360occlusion':
+                kitti_priors = list(KITTI360_PRIORS.values())
+                del kitti_priors[-1]
+                self.register_buffer('class_weights', torch.sqrt(1 / torch.Tensor(kitti_priors)))
             elif priors == 'nuscenes':
                 nuscenes_bev_priors = list(NUSCENES_BEV_PRIORS.values())
                 del nuscenes_bev_priors[-1]
                 del nuscenes_bev_priors[6]
                 self.register_buffer('class_weights', torch.sqrt(1 / torch.Tensor(nuscenes_bev_priors)))
+            elif priors == 'nuscenesocclusion':
+                nuscenes_bev_priors = list(NUSCENES_BEV_PRIORS.values())
+                del nuscenes_bev_priors[-1]
+                self.register_buffer('class_weights', torch.sqrt(1 / torch.Tensor(nuscenes_bev_priors)))                
             else:
                 raise ValueError(f"Unknown prior option '{priors}'")
         

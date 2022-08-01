@@ -1,0 +1,49 @@
+data:
+  target: bev.data.data_module.DataModuleFromConfig
+  params:
+    batch_size: 1
+    validation:
+      target: bev.data.kitti_bev.KITTIBEVValidation
+      params:
+        rgb_root: /globalwork/data/KITTI_odometry_color/dataset/sequences/
+        bev_root: /globalwork/hoffhues/BEV_data/sequences
+        depth_root: /globalwork/hoffhues/KITTI_images/depth/
+        n_labels: 11
+        split: ['00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10']
+        preprocess_param:
+          crop_region: [300, 580, 1300, 1580]
+          flip_prob: 0.0
+          rgb_size: [384, 1408]
+          bev_size: [200, 200]
+        mapping_param:
+          unique_ids: [0, 40, 48, 50, 51, 70, 72, 30, 31, 10, 18]
+          remaps:
+            _44: 1
+            _154: 7
+            _32: 8
+            _11: 8
+            _15: 8
+            _153: 8
+            _155: 8
+            _152: 9
+            _13: 10
+            _157: 10
+            _158: 10      
+
+eval:
+  n_classes: 10
+  class_names: ['road', 'sidewalk', 'building', 'wall', 'vegetation', 'terrain', 'person',
+                  'rider', 'car', 'truck']
+  colorize: [[255, 0, 255],
+               [75, 0, 75],
+               [255, 200, 0],
+               [255, 120, 50],
+               [0, 175, 0],
+               [150, 240, 80],
+               [255, 30, 30],
+               [100, 230, 245],
+               [100, 150, 245],
+               [80, 30, 180],
+               [0, 0, 0]]
+  inference_save_directory: /globalwork/hoffhues/BEV_data/inference/BEVTransformer
+  result_save_directory: /globalwork/hoffhues/BEV_data/results/BEVTransformer  

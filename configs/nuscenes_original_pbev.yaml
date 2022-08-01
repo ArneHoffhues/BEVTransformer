@@ -4,28 +4,28 @@ model:
   params:
     n_labels: 10
     n_embed: 256
-    class_names: ['road', 'sidewalk', 'building', 'wall', 'vegetation', 'terrain', 'person',
-                  'rider', 'car', 'truck']
+    class_names: ['road', 'sidewalk', 'manmade', 'vegetation', 'terrain', 'occlusion', 'person',
+                  'car', 'truck', 'rider']
     colorize: [[255, 0, 255],
                [75, 0, 75],
-               [255, 200, 0],
-               [255, 120, 50],
+               [70, 70, 70],
                [0, 175, 0],
                [150, 240, 80],
+               [128, 128, 128],
                [255, 30, 30],
-               [100, 230, 245],
                [100, 150, 245],
                [80, 30, 180],
+               [100, 230, 245],
                [0, 0, 0]]
     ignore_index: 255
     transformer_config:
       target: bev.model.transformer.SamplingTransformer
       params:
-        bev_grid_size: [50, 50]
+        bev_grid_size: [59, 69]
         grid_cell_width: 1
         vertical_sampling_range: [-3, 3]
         n_samples_vertical: 20
-        n_samples_ray: 50
+        n_samples_ray: 60
         neighbourhood_size: 7
         initialization_level: -0.5
         n_embed: 256
@@ -34,11 +34,14 @@ model:
         dim_feedforward: 1024
         normalize_before: False
         activation: 'relu'
-        with_cross_attention: False
     pos_encoding_config:
       target: bev.model.pos_encoding.PositionEmbeddingSine
       params:
         num_pos_feats: 128
+    height_pos_encoding_config:
+      target: bev.model.pos_encoding.PositionEmbeddingSineHeight
+      params:
+        num_pos_feats: 256
     backbone_config:
       target: bev.model.backbone.swin.SwinFPN
       params:      
@@ -51,18 +54,17 @@ model:
         in_ch: 256
         out_ch: 256
         n_classes: 10
-        bev_grid_size: [50, 50]
+        bev_grid_size: [59, 69]
         grid_cell_width: 1
         vertical_sampling_range: [-3, 3]
         n_samples: 20
         initialization_level: -0.5
-        ground_projected: True
     decoder_config:
       target: bev.model.decoder.Decoder
       params:
         in_channels: 256
         num_classes: 10
-        final_res: [676, 676]
+        final_res: [768, 896]
         predict_vis: True
         layers: [6, 4, 4, 4]
         strides: [1, 2, 2, 2]
@@ -70,44 +72,43 @@ model:
       target: bev.model.loss.CombinedLoss
       params:
         extrinsics:
-          translation: [0.8, 0.3, 1.55]
-          rotation: [-85, 0, 180]
+          translation: [0.0, 0.6, 1.85]
+          rotation: [-90, 0, 180]
         background_classes: [2, 3, 4, 5]
         foreground_classes: [0, 1, 6, 7, 8, 9]
-        out_shape: [676, 676]
-        resolution: 0.074
-        priors: kitti360
+        loss_weights: [1, 10, 1]
+        out_shape: [768, 896]
+        resolution: 0.077
+        priors: nuscenesocclusion
 
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 5
+    batch_size: 4
     num_workers: 8
-    dataset: kitti360
+    dataset: nuscenes_bev
     with_depth: False
     train:
-      target: bev.data.kitti360_bev.KITTI360BEVTrain
+      target: bev.data.nuscenes_bev.NuScenesBEVTrain
       params:
         n_labels: 10
         preprocess_param:
-          rgb_size: [384, 1408]
-          bev_size: [676, 676]
-          bottom_crop_augmentation_prob: 0.
-          side_crop_augmentation_prob: 0.
-          rotate_augmentation_prob: 0.
+          rgb_size: [448, 768]
+          bev_size: [768, 896]
           brightness_factor: 0
           contrast_factor: 0
+        mapping_param:
+          unique_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     validation:
-      target: bev.data.kitti360_bev.KITTI360BEVValidation
+      target: bev.data.nuscenes_bev.NuScenesBEVValidation
       params:
         n_labels: 10
         preprocess_param:
-          rgb_size: [384, 1408]
-          bev_size: [676, 676]
-          bottom_crop_augmentation_prob: 0.
-          side_crop_augmentation_prob: 0.
-          rotate_augmentation_prob: 0.
+          rgb_size: [448, 768]
+          bev_size: [768, 896]
           flip_prob: 0.
           brightness_factor: 0
           contrast_factor: 0
-
+        mapping_param:
+          unique_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+          

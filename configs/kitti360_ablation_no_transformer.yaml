@@ -1,6 +1,6 @@
 model:
   base_learning_rate: 4.5e-06
-  target: bev.model.model.BEVTransformer
+  target: bev.model.model.NoTransformer
   params:
     n_labels: 10
     n_embed: 256
@@ -18,27 +18,6 @@ model:
                [80, 30, 180],
                [0, 0, 0]]
     ignore_index: 255
-    transformer_config:
-      target: bev.model.transformer.SamplingTransformer
-      params:
-        bev_grid_size: [50, 50]
-        grid_cell_width: 1
-        vertical_sampling_range: [-3, 3]
-        n_samples_vertical: 20
-        n_samples_ray: 50
-        neighbourhood_size: 7
-        initialization_level: -0.5
-        n_embed: 256
-        n_head: 8
-        num_layers: 6
-        dim_feedforward: 1024
-        normalize_before: False
-        activation: 'relu'
-        with_cross_attention: False
-    pos_encoding_config:
-      target: bev.model.pos_encoding.PositionEmbeddingSine
-      params:
-        num_pos_feats: 128
     backbone_config:
       target: bev.model.backbone.swin.SwinFPN
       params:      
@@ -81,8 +60,8 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 5
-    num_workers: 8
+    batch_size: 16
+    num_workers: 16
     dataset: kitti360
     with_depth: False
     train:

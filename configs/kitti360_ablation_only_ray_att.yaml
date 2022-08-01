@@ -34,6 +34,7 @@ model:
         dim_feedforward: 1024
         normalize_before: False
         activation: 'relu'
+        with_neighbourhood_attention: False
         with_cross_attention: False
     pos_encoding_config:
       target: bev.model.pos_encoding.PositionEmbeddingSine
@@ -81,7 +82,7 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 5
+    batch_size: 8
     num_workers: 8
     dataset: kitti360
     with_depth: False

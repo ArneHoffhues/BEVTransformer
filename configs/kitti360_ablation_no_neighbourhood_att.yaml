@@ -84,8 +84,8 @@ model:
 data:
   target: bev.data.data_module.DataModuleFromConfig
   params:
-    batch_size: 3
-    num_workers: 4
+    batch_size: 7
+    num_workers: 8
     dataset: kitti360
     with_depth: False
     train:
