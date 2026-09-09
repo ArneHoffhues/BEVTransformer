@@ -46,7 +46,7 @@ For training and evaluation KITTI-360 PanopticBEV and nuScenes PanopticBEV was u
 | PON    | 68.2 | 12.6     | 31.8    | 29.9       | 23.0    | 0.0    | 14.7 | 7.2  | 0.0   | 20.8 |
 | PON*   | 74.1 | 23.3     | 31.6    | 34.4       | 29.0    | 2.9    | 32.2 | 27.6 | 5.6   | 29.0 |
 | PBEV*  | 77.3 | 28.6     | 36.7    | 35.1       | 33.6    | **5.0**| 40.5 | 33.5 | 9.6   | 33.3 |
-| **BEVT** | 82.3 | **33.3** | 44.3 | **42.7** | 40.1 | 1.0 | 52.0 | **46.6** | **10.1** | **39.2** |
+| **BEVT** | **82.3** | **33.3** | **44.3** | **42.7** | **40.1** | 1.0 | **52.0** | **46.6** | **10.1** | **39.2** |
 
 *IoU results on the validation split of nuScenes PanopticBEV. The upper part summarizes baselines from the literature. BEVT is our BEVTransformer architecture. Best results per class are highlighted in bold.*
 
@@ -59,7 +59,7 @@ For training and evaluation KITTI-360 PanopticBEV and nuScenes PanopticBEV was u
 | PON    | 65.4 | 26.2     | 25.5     | 1.9  | 38.8       | 12.9    | 0.0    | 0.0   | 25.1 | 0.9  | 19.7 |
 | PON*   | 73.4 | 34.0     | 27.6     | 9.1  | 36.8       | 33.0    | 1.6    | 3.0   | 37.0 | 14.5 | 27.0 |
 | PBEV*  | 75.5 | 40.1     | 28.7     | **16.4** | 40.9   | 35.6    | **4.8**| 8.5   | 42.5 | 15.3 | 30.8 |
-| **BEVT** | **77.6** | 40.5 | **44.1** | 13.8 | **58.7** | **41.5** | 0.0 | 8.7 | **56.7** | **16.1** | **35.8** |
+| **BEVT** | **77.6** | **40.5** | **44.1** | 13.8 | **58.7** | **41.5** | 0.0 | **8.7** | **56.7** | **16.1** | **35.8** |
 
 *IoU results on the validation split of KITTI-360 PanopticBEV. The upper part summarizes baselines from the literature. BEVT is our BEVTransformer architecture. Best results per class are highlighted in bold.*
 
