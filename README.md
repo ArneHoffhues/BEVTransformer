@@ -35,7 +35,7 @@ The custom-tailored transformer consists of 3 modules, each one attending to dif
 
 ## Results
 
-For training and evaluation KITTI-360 PanopticBEV and nuScenes PanopticBEV was used (Gosala et al., 2022). Our model is compared against baselines based on Intersection over Union (IoU) as a performance metric. It achieves at least 18% higher values in terms of mean IoU.
+For training and evaluation KITTI-360 PanopticBEV and nuScenes PanopticBEV was used (Gosala et al., 2022). Our model is compared against baselines based on Intersection over Union (IoU) as a performance metric. It achieves higher results in terms of mean IoU and for most of the individual classes.
 
 ### nuScenes PanopticBEV
 
@@ -63,7 +63,7 @@ For training and evaluation KITTI-360 PanopticBEV and nuScenes PanopticBEV was u
 
 *IoU results on the validation split of KITTI-360 PanopticBEV. The upper part summarizes baselines from the literature. BEVT is our BEVTransformer architecture. Best results per class are highlighted in bold.*
 
-The baselines used for comparison are VED (Lu et al., 2019), VPN (Pan et al., 2020), Pyramid Occupancy Networks / PON (Roddick and Cipolla, 2020) and PanopticBEV / PBEV (Gosala et al., 2022). The asterisk indicates a slightly altered evaluation format used by Gosala et al., 2022.
+Baselines: VED (Lu et al., 2019), VPN (Pan et al., 2020), Pyramid Occupancy Networks / PON (Roddick and Cipolla, 2020) and PanopticBEV / PBEV (Gosala et al., 2022). The asterisk indicates that slightly differing ground plane dimensions were used for evaluation and training as described in Gosala et al., 2022. Direct comparability is not given, results are shown for reference and completeness. A retraining of PBEV on modified dimensions was not possible due to lack of computational resources.
 
 ## Qualitative Results
 
